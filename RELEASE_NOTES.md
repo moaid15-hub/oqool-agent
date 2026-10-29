@@ -1,3 +1,3 @@
-Oqool Agent 0.3.6
+Oqool Agent 0.3.7
 
-- At start: the name only, «Oqool Agent» in colour, then the connection line.
+- At start: OQOOL in big block letters (teal to blue), then the connection line.
