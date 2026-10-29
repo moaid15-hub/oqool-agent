@@ -13,8 +13,9 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createOps, SKIP_DIRS } from './ops.mjs';
 import { openBrowser, installService, uninstallService, serviceStatus } from './service.mjs';
+import * as ui from './ui.mjs';
 
-const VERSION = '0.3.4';
+const VERSION = '0.3.5';
 // how the user started it: the installed program (`oqool-agent`) or the script (`node agent.mjs`)
 const BIN = /^(node|bun)(\.exe)?$/i.test(path.basename(process.execPath)) ? 'node agent.mjs' : 'oqool-agent';
 const T = {
@@ -234,7 +235,10 @@ async function serve(folders, stdio = false, quiet = false) {
 
   function onMessage(from, m) {
     if (!m || typeof m !== 'object') return;
-    const reply = (x) => send(from, { id: m.id, ...x });
+    const t0 = Date.now();
+    // one coloured line per operation on the terminal (not in the background log, not in the test mode)
+    const show = !quiet && !stdio && m.op !== 'info';
+    const reply = (x) => { if (show) out(ui.finished(m, x, Date.now() - t0)); send(from, { id: m.id, ...x }); };
     try {
       if (m.op === 'info') return reply({ ok: true, root, roots: ops.allowed(), platform: process.platform, arch: process.arch, shell: process.platform === 'win32' ? 'cmd' : 'bash', version: VERSION, ops: OPS });
       if (ops.has(m.op)) { ops.handle({ ...m, version: VERSION }).then((r) => reply(r)); return; }
@@ -257,7 +261,6 @@ async function serve(folders, stdio = false, quiet = false) {
         if (m.append) fs.appendFileSync(abs, buf); else fs.writeFileSync(abs, buf);
         if (!m.append) known.set(relOf(root, abs), sha(buf));
         ops.record('write', ops.logArgs(m), true, 0);
-        if (!stdio) out(`${t('wrote')} ${relOf(root, abs)}`);
         return reply({ ok: true });
       }
       if (m.op === 'delete') {
@@ -271,7 +274,7 @@ async function serve(folders, stdio = false, quiet = false) {
         const cwd = inside(root, m.cwd || '.');
         try { ops.checkCmd(m.cmd); } catch (e) { ops.record('exec', ops.logArgs(m), false, 0, e.message); return reply({ op: 'exit', code: null, error: e.message, changed: [] }); }
         ops.record('exec', ops.logArgs(m), true, 0);
-        if (!stdio) out(`${t('run')}: ${String(m.cmd).slice(0, 200)}`);
+        if (show) out(ui.started(m));
         const child = process.platform === 'win32'
           ? spawn('cmd.exe', ['/d', '/s', '/c', `"${String(m.cmd)}"`], { cwd, windowsVerbatimArguments: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
           : spawn('bash', ['-lc', String(m.cmd)], { cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
@@ -316,27 +319,51 @@ async function serve(folders, stdio = false, quiet = false) {
     return new Promise(() => {});
   }
 
+  let firstOpen = true;
+  let lastIn = Date.now();
+  let beat = null;
+  /** The socket went silent: drop it (its own close event is ignored) and connect again. */
+  const stale = (s) => {
+    if (s !== ws || closing) return;
+    s.__stale = true;
+    try { s.close(); } catch { /* already gone */ }
+    out(quiet ? 'heartbeat lost, reconnecting' : ui.status.lost());
+    setTimeout(connect, 1000);
+  };
+  if (!quiet) out(ui.banner(VERSION));
   const connect = () => {
-    ws = new WebSocket(`${acc.relay.replace(/^http/, 'ws')}/ws/agent?token=${encodeURIComponent(acc.token)}`);
+    if (!quiet) out(ui.status.connecting());
+    const sock = new WebSocket(`${acc.relay.replace(/^http/, 'ws')}/ws/agent?token=${encodeURIComponent(acc.token)}`);
+    ws = sock;
     ws.addEventListener('open', () => {
       backoff = 1000;
       ws.send(JSON.stringify({ t: 'hello', cwd: root, version: VERSION, platform: process.platform }));
       if (!quiet) {
-        out(`${t('online')} — ${ops.whole() ? t('wholeMachine') : ops.allowed().join(', ')}`);
-        out(t('stop'));
-      }
+        out(ui.status.online(ops.whole() ? t('wholeMachine') : ops.allowed().join(', ')));
+        if (firstOpen) out(ui.c.dim(`         ${t('stop')}`));
+      } else out('online');
+      firstOpen = false;
+      // heartbeat: a connection can die without a close event (sleep, network change); no message for 90 s = reconnect
+      lastIn = Date.now();
+      clearInterval(beat);
+      beat = setInterval(() => {
+        if (Date.now() - lastIn > 90_000) { clearInterval(beat); stale(sock); return; }
+        try { sock.send('{"t":"ping"}'); } catch { /* close follows */ }
+      }, 30_000);
     });
     ws.addEventListener('message', (ev) => {
+      lastIn = Date.now();
       let m; try { m = JSON.parse(String(ev.data)); } catch { return; }
       if (m.t === 'peer') onMessage(m.from, m.msg);
     });
     ws.addEventListener('close', (ev) => {
-      if (closing) return;
+      if (closing || sock.__stale || sock !== ws) return;
+      clearInterval(beat);
       if (ev.code === 4001) { out(t('revoked')); process.exit(2); }
       // another Oqool Agent on this computer connected with the same link (the newest wins): this one steps aside
       // instead of taking the connection back every second (exit 2 = the background service does not restart it)
       if (ev.code === 4000) { out(t('replaced')); ops.stopAll(); process.exit(2); }
-      out(t('reconnect'));
+      out(quiet ? 'disconnected, retrying' : ui.status.lost());
       setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 30000);
     });
