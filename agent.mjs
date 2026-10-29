@@ -15,7 +15,7 @@ import { createOps, SKIP_DIRS } from './ops.mjs';
 import { openBrowser, installService, uninstallService, serviceStatus } from './service.mjs';
 import * as ui from './ui.mjs';
 
-const VERSION = '0.3.5';
+const VERSION = '0.3.6';
 // how the user started it: the installed program (`oqool-agent`) or the script (`node agent.mjs`)
 const BIN = /^(node|bun)(\.exe)?$/i.test(path.basename(process.execPath)) ? 'node agent.mjs' : 'oqool-agent';
 const T = {

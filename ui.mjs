@@ -9,28 +9,9 @@ export const c = {
   blue: rgb(96, 165, 250), rose: rgb(251, 113, 133), gray: rgb(148, 163, 184), green: rgb(74, 222, 128),
 };
 
-// the wordmark: «OQOOL» in block letters, teal → violet
-const WORD = [
-  ' ██████   ██████   ██████   ██████  ██      ',
-  '██    ██ ██    ██ ██    ██ ██    ██ ██      ',
-  '██    ██ ██    ██ ██    ██ ██    ██ ██      ',
-  '██    ██ ██ ▄▄ ██ ██    ██ ██    ██ ██      ',
-  ' ██████   ██████   ██████   ██████  ███████ ',
-  '             ▀▀                             ',
-];
+// the name at start: one word, like other terminal tools show theirs · الاسم عند البدء: كلمة واحدة
 export function banner(version) {
-  const from = [45, 212, 191], to = [167, 139, 250];
-  const lines = WORD.map((row) => {
-    if (!on()) return row;
-    let outp = '';
-    for (let i = 0; i < row.length; i++) {
-      const k = i / (row.length - 1);
-      const [r, g, b] = from.map((v, j) => Math.round(v + (to[j] - v) * k));
-      outp += row[i] === ' ' ? ' ' : `\x1b[38;2;${r};${g};${b}m${row[i]}`;
-    }
-    return outp + '\x1b[0m';
-  });
-  return ['', ...lines.map((l) => '  ' + l), `  ${c.bold('Agent')} ${c.dim(version)}  ${c.dim('·')}  ${c.gray('connects AI models to this computer')}`, ''].join('\n');
+  return `\n  ${c.bold(c.teal('Oqool'))} ${c.blue('Agent')} ${c.dim(version)}\n`;
 }
 
 // one glyph per kind of work (Desktop Commander uses ✓ and a green dot; ours are diamonds by colour)
