@@ -17,11 +17,13 @@ fs.writeFileSync(path.join(root, 'src/deep/x.py'), 'print("TODO here")\n');
 fs.writeFileSync(path.join(root, 'img.png'), Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'));
 fs.writeFileSync(path.join(outside, 'secret.txt'), 'no');
 
+// AGENT_BIN = a compiled program; AGENT_SCRIPT = the Node script (oqool-agent.mjs) built for Windows
 const bin = process.env.AGENT_BIN;
+const script = process.env.AGENT_SCRIPT;
 const env = { ...process.env, OQOOL_AGENT_HOME: path.join(tmp, 'home'), OQOOL_AGENT_NO_UPDATE: '1' };
 const child = bin
   ? spawn(bin, ['--stdio', root], { env, stdio: ['pipe', 'pipe', 'inherit'] })
-  : spawn(process.execPath, [path.join(here, '..', 'agent.mjs'), '--stdio', root], { env, stdio: ['pipe', 'pipe', 'inherit'] });
+  : spawn(process.execPath, [script || path.join(here, '..', 'agent.mjs'), '--stdio', root], { env, stdio: ['pipe', 'pipe', 'inherit'] });
 let buf = ''; const waiting = new Map(); let seq = 0;
 child.stdout.setEncoding('utf8');
 child.stdout.on('data', (c) => { buf += c; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); let m; try { m = JSON.parse(l); } catch { continue; } if (m.op === 'out' || m.op === 'file') continue; const w = waiting.get(m.id); if (w) { waiting.delete(m.id); w(m); } } });
@@ -130,7 +132,7 @@ check('process exited after shutdown', exited);
 // the whole computer (no folder) and a filesystem root as the folder · الحاسبة كلها، والجذر «/» كمجلد
 const env2 = { ...env, OQOOL_AGENT_HOME: path.join(tmp, 'home2') }; // a fresh home: the settings above narrowed the first one
 for (const args of [[], ['/']]) {
-  const c = bin ? spawn(bin, ['--stdio', ...args], { env: env2, stdio: ['pipe', 'pipe', 'inherit'] }) : spawn(process.execPath, [path.join(here, '..', 'agent.mjs'), '--stdio', ...args], { env: env2, stdio: ['pipe', 'pipe', 'inherit'] });
+  const c = bin ? spawn(bin, ['--stdio', ...args], { env: env2, stdio: ['pipe', 'pipe', 'inherit'] }) : spawn(process.execPath, [script || path.join(here, '..', 'agent.mjs'), '--stdio', ...args], { env: env2, stdio: ['pipe', 'pipe', 'inherit'] });
   const outp = await new Promise((res) => { let o = ''; c.stdout.on('data', (d) => { o += d; }); c.on('exit', () => res(o)); c.stdin.end(JSON.stringify({ id: 1, op: 'read', path: path.join(outside, 'secret.txt') }) + '\n'); });
   const m = JSON.parse(outp.trim().split('\n')[0] || '{}');
   check(`whole computer ${args.length ? 'as /' : 'by default'}`, m.ok && m.text === 'no', outp.slice(0, 160));

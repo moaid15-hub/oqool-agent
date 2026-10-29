@@ -15,9 +15,14 @@ import { createOps, SKIP_DIRS } from './ops.mjs';
 import { openBrowser, installService, uninstallService, serviceStatus } from './service.mjs';
 import * as ui from './ui.mjs';
 
-const VERSION = '0.3.7';
+const VERSION = '0.4.0';
 // how the user started it: the installed program (`oqool-agent`) or the script (`node agent.mjs`)
-const BIN = /^(node|bun)(\.exe)?$/i.test(path.basename(process.execPath)) ? 'node agent.mjs' : 'oqool-agent';
+// installed as one script run by Node (Windows: Smart App Control blocks unsigned programs; Node is signed) or as
+// one compiled program (Linux, macOS) · سكربت يشغّله Node على Windows، أو برنامج واحد على Linux وmacOS
+const SCRIPT = path.basename(process.argv[1] || '') === 'oqool-agent.mjs' ? fs.realpathSync(process.argv[1]) : null;
+const BIN = SCRIPT || !/^(node|bun)(\.exe)?$/i.test(path.basename(process.execPath)) ? 'oqool-agent' : 'node agent.mjs';
+/** How to start this same agent again (a service, a restart after an update). */
+const SELF = SCRIPT ? [process.execPath, SCRIPT] : [process.execPath];
 const T = {
   linkCode: 'Link code',
   open: 'Approve in your browser',
@@ -109,6 +114,7 @@ async function login() {
 const REPO = 'moaid15-hub/oqool-agent';
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
 const assetName = () => {
+  if (SCRIPT) return 'oqool-agent.mjs';
   const os_ = process.platform === 'win32' ? 'windows' : process.platform;
   return `oqool-agent-${os_}-${process.arch}${process.platform === 'win32' ? '.exe' : ''}`;
 };
@@ -118,8 +124,8 @@ async function latestVersion() {
   return m ? m[1] : null;
 }
 async function selfUpdate(explicit = false) {
-  if (BIN !== 'oqool-agent') return false; // the script form updates with git, not here
-  const exe = process.execPath;
+  if (BIN !== 'oqool-agent') return false; // the development script updates with git, not here
+  const exe = SCRIPT || process.execPath;
   try { fs.rmSync(exe + '.old', { force: true }); } catch { /* still locked on Windows: next time */ }
   if (!explicit && process.env.OQOOL_AGENT_NO_UPDATE === '1') return false;
   try {
@@ -137,7 +143,8 @@ async function selfUpdate(explicit = false) {
     if (!want || crypto.createHash('sha256').update(buf).digest('hex') !== want) throw new Error('checksum');
     const tmp = exe + '.new';
     fs.writeFileSync(tmp, buf, { mode: 0o755 });
-    if (process.platform === 'win32') { fs.renameSync(exe, exe + '.old'); fs.renameSync(tmp, exe); }
+    if (SCRIPT) fs.renameSync(tmp, exe); // a script is not locked while Node runs it
+    else if (process.platform === 'win32') { fs.renameSync(exe, exe + '.old'); fs.renameSync(tmp, exe); }
     else fs.renameSync(tmp, exe); // the running program keeps its old inode; the path now holds the new one
     out(`${t('updated')} ${v}`);
     return true;
@@ -155,9 +162,10 @@ function restartSelf() {
   const env = { ...process.env, OQOOL_AGENT_NO_UPDATE: '1' };
   let child;
   // a parent without a console (a service, a remote shell) cannot hand its handles over on Windows: pipe them instead
-  try { child = spawn(process.execPath, process.argv.slice(2), { stdio: 'inherit', env }); }
+  const args = [...SELF.slice(1), ...process.argv.slice(2)];
+  try { child = spawn(SELF[0], args, { stdio: 'inherit', env }); }
   catch {
-    child = spawn(process.execPath, process.argv.slice(2), { stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true });
+    child = spawn(SELF[0], args, { stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true });
     child.stdout.pipe(process.stdout); child.stderr.pipe(process.stderr);
   }
   process.on('SIGINT', () => { /* the child gets Ctrl+C itself */ });
@@ -384,7 +392,7 @@ else if (cmd === 'setup') {
   // link (once), then the background agent with the whole computer, started with the computer
   if (!readAccount()?.token && (await login()) !== 0) process.exit(1);
   if (BIN !== 'oqool-agent') { out(t('setupNoService')); process.exit(0); }
-  const r = installService(process.execPath, HOME);
+  const r = installService(SELF, HOME);
   if (r.kind === 'none') out(t('setupNoService'));
   else { out(t('setupDone')); out(`${t('setupNext')} ${RELAY}/mcp`); }
 }

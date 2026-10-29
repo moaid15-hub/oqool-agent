@@ -31,8 +31,11 @@ jobs:
             ext=""; [ "$t" = windows-x64 ] && ext=".exe"
             bun build --compile --minify --target=bun-$t agent.mjs --outfile dist/oqool-agent-$t$ext
           done
+          # Windows runs the agent as one script with the signed Node.js (Smart App Control blocks unsigned programs)
+          bun build agent.mjs --target=node --minify --outfile dist/oqool-agent.mjs
+          node dist/oqool-agent.mjs --version
           cp install.sh install.ps1 dist/
-          (cd dist && sha256sum oqool-agent-* > SHA256SUMS)
+          (cd dist && sha256sum oqool-agent* > SHA256SUMS)
           ls -la dist && cat dist/SHA256SUMS
       - name: smoke test (linux-x64)
         run: |

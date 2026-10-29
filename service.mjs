@@ -26,11 +26,15 @@ const desktopPath = () => path.join(os.homedir(), '.config', 'autostart', 'oqool
 const plistPath = () => path.join(os.homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
 const run = (cmd, args) => spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true });
 
-/** Installs and starts the background service for `exe` with HOME env carried over. Returns how it was installed. */
-export function installService(exe, home) {
+const psEncoded = (script) => Buffer.from(script, 'utf16le').toString('base64');
+
+/** Installs and starts the background service. `parts` = how to start the agent: [program] or [node, script]. */
+export function installService(parts, home) {
+  const [exe, ...extra] = parts;
   const envHome = process.env.OQOOL_AGENT_HOME ? home : null;
+  const quoted = parts.map((p) => JSON.stringify(p)).join(' ');
   if (process.platform === 'linux') {
-    const unit = `[Unit]\nDescription=Oqool Agent\nAfter=network-online.target\n\n[Service]\nExecStart=${JSON.stringify(exe)} --service\nRestart=always\nRestartSec=5\nRestartPreventExitStatus=2\n${envHome ? `Environment=OQOOL_AGENT_HOME=${envHome}\n` : ''}\n[Install]\nWantedBy=default.target\n`;
+    const unit = `[Unit]\nDescription=Oqool Agent\nAfter=network-online.target\n\n[Service]\nExecStart=${quoted} --service\nRestart=always\nRestartSec=5\nRestartPreventExitStatus=2\n${envHome ? `Environment=OQOOL_AGENT_HOME=${envHome}\n` : ''}\n[Install]\nWantedBy=default.target\n`;
     fs.mkdirSync(path.dirname(unitPath()), { recursive: true });
     fs.writeFileSync(unitPath(), unit);
     const r1 = run('systemctl', ['--user', 'daemon-reload']);
@@ -41,13 +45,13 @@ export function installService(exe, home) {
     }
     // no user systemd (containers, some distros): start now and autostart with the desktop session
     fs.mkdirSync(path.dirname(desktopPath()), { recursive: true });
-    fs.writeFileSync(desktopPath(), `[Desktop Entry]\nType=Application\nName=Oqool Agent\nExec=${exe} --service\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n`);
-    spawn(exe, ['--service'], { stdio: 'ignore', detached: true, env: process.env }).unref();
+    fs.writeFileSync(desktopPath(), `[Desktop Entry]\nType=Application\nName=Oqool Agent\nExec=${quoted} --service\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n`);
+    spawn(exe, [...extra, '--service'], { stdio: 'ignore', detached: true, env: process.env }).unref();
     return { kind: 'autostart', file: desktopPath() };
   }
   if (process.platform === 'darwin') {
     const logs = path.join(home, 'agent.log');
-    const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LABEL}</string>\n<key>ProgramArguments</key><array><string>${exe}</string><string>--service</string></array>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><true/>\n<key>StandardOutPath</key><string>${logs}</string>\n<key>StandardErrorPath</key><string>${logs}</string>\n${envHome ? `<key>EnvironmentVariables</key><dict><key>OQOOL_AGENT_HOME</key><string>${envHome}</string></dict>\n` : ''}</dict></plist>\n`;
+    const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LABEL}</string>\n<key>ProgramArguments</key><array>${parts.map((p) => `<string>${p}</string>`).join('')}<string>--service</string></array>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><true/>\n<key>StandardOutPath</key><string>${logs}</string>\n<key>StandardErrorPath</key><string>${logs}</string>\n${envHome ? `<key>EnvironmentVariables</key><dict><key>OQOOL_AGENT_HOME</key><string>${envHome}</string></dict>\n` : ''}</dict></plist>\n`;
     fs.mkdirSync(path.dirname(plistPath()), { recursive: true });
     run('launchctl', ['unload', plistPath()]);
     fs.writeFileSync(plistPath(), plist);
@@ -56,16 +60,20 @@ export function installService(exe, home) {
   }
   if (process.platform === 'win32') {
     // a hidden start through PowerShell, at every sign-in; started now as well
-    const ps = `Start-Process -WindowStyle Hidden -FilePath '${exe.replace(/'/g, "''")}' -ArgumentList '--service'`;
-    const value = `powershell.exe -NoProfile -WindowStyle Hidden -Command "${ps}"`;
+    const q1 = (x) => x.replace(/'/g, "''");
+    const argList = [...extra.map((a) => `"${a}"`), '--service'].join(' ');
+    const ps = `Start-Process -WindowStyle Hidden -FilePath '${q1(exe)}' -ArgumentList '${q1(argList)}'`;
+    // encoded, so no quoting of paths can break the start line · مُرمَّز كي لا تكسره علامات التنصيص في المسارات
+    const value = `powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand ${psEncoded(ps)}`;
     run('reg', ['add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'OqoolAgent', '/t', 'REG_SZ', '/d', value, '/f']);
     // start it now OUTSIDE this window: a child of setup dies when setup's console closes. WMI creates the process
     // under its own service, so it outlives this window · يُشغَّل عبر WMI كي لا يموت مع نافذة الإعداد.
     // SW_HIDE (ShowWindow=0): no console window at all — Windows 11 otherwise hands the new console to a visible
     // Terminal window, and closing it ends the agent · بلا نافذة إطلاقاً، فإغلاق نافذة لا يوقفه
-    const wmi = `$si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}; $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='"${exe.replace(/'/g, "''")}" --service'; ProcessStartupInformation=$si}; exit $r.ReturnValue`;
-    const r = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', wmi]);
-    if (r.status !== 0) spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], { stdio: 'ignore', detached: true, windowsHide: true }).unref();
+    const line = [exe, ...extra].map((p) => `"${p}"`).join(' ') + ' --service';
+    const wmi = `$si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}; $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='${q1(line)}'; ProcessStartupInformation=$si}; exit $r.ReturnValue`;
+    const r = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', psEncoded(wmi)]);
+    if (r.status !== 0) spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', psEncoded(ps)], { stdio: 'ignore', detached: true, windowsHide: true }).unref();
     return { kind: 'windows-run', file: 'HKCU\\…\\Run\\OqoolAgent' };
   }
   return { kind: 'none' };
