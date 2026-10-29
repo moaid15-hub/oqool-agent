@@ -15,7 +15,7 @@ import { createOps, SKIP_DIRS } from './ops.mjs';
 import { openBrowser, uninstallService, serviceStatus } from './service.mjs';
 import * as ui from './ui.mjs';
 
-const VERSION = '0.5.1';
+const VERSION = '0.5.2';
 // how the user started it: the installed program (`oqool-agent`) or the script (`node agent.mjs`)
 // installed as one script run by Node (Windows: Smart App Control blocks unsigned programs; Node is signed) or as
 // one compiled program (Linux, macOS) · سكربت يشغّله Node على Windows، أو برنامج واحد على Linux وmacOS
@@ -152,16 +152,17 @@ async function selfUpdate(explicit = false) {
     return false;
   }
 }
+const UPDATE_EVERY = Number(process.env.OQOOL_AGENT_UPDATE_EVERY_MS) || 10 * 60 * 1000;
 const OPS = ['info', 'snapshot', 'write', 'delete', 'exec', 'kill', 'read', 'read_many', 'list', 'stat', 'mkdir', 'move', 'edit',
   'search.start', 'search.more', 'search.stop', 'search.list', 'session.start', 'session.read', 'session.input', 'session.list', 'session.stop',
   'ps', 'ps.kill', 'config.get', 'config.set', 'log', 'stats', 'shutdown'];
 
 /** Starts the freshly installed program with the same arguments and leaves with its exit code. */
-function restartSelf() {
-  const env = { ...process.env, OQOOL_AGENT_NO_UPDATE: '1' };
+function restartSelf(argv = process.argv.slice(2)) {
+  const env = { ...process.env, OQOOL_AGENT_FRESH: '1' }; // just updated: no check at its start (later checks still run)
   let child;
   // a parent without a console (a service, a remote shell) cannot hand its handles over on Windows: pipe them instead
-  const args = [...SELF.slice(1), ...process.argv.slice(2)];
+  const args = [...SELF.slice(1), ...argv];
   try { child = spawn(SELF[0], args, { stdio: 'inherit', env }); }
   catch {
     child = spawn(SELF[0], args, { stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true });
@@ -342,7 +343,7 @@ async function serve(folders, stdio = false, quiet = false) {
     out(quiet ? 'heartbeat lost, reconnecting' : ui.status.lost());
     setTimeout(connect, 1000);
   };
-  if (!quiet) out(ui.banner(VERSION));
+  if (!quiet) out(ui.banner({ version: VERSION, account: acc.name, scope: ops.whole() ? t('wholeMachine') : ops.allowed().join(', '), connector: `${acc.relay || RELAY}/mcp` }));
   const connect = () => {
     if (!quiet) out(ui.status.connecting());
     const sock = new WebSocket(`${acc.relay.replace(/^http/, 'ws')}/ws/agent?token=${encodeURIComponent(acc.token)}`);
@@ -352,7 +353,6 @@ async function serve(folders, stdio = false, quiet = false) {
       ws.send(JSON.stringify({ t: 'hello', cwd: root, version: VERSION, platform: process.platform }));
       if (!quiet) {
         out(ui.status.online(ops.whole() ? t('wholeMachine') : ops.allowed().join(', ')));
-        if (firstOpen) out(ui.c.dim(`         ${t('stop')}`));
       } else out('online');
       firstOpen = false;
       // heartbeat: a connection can die without a close event (sleep, network change); no message for 90 s = reconnect
@@ -382,6 +382,22 @@ async function serve(folders, stdio = false, quiet = false) {
     ws.addEventListener('error', () => { /* close follows */ });
   };
   connect();
+  // updates itself while it runs: a check every 10 minutes; a new version waits until no command or process is running,
+  // then the same window continues with it · يحدّث نفسه وهو شغّال، وينتظر حتى لا يكون أمر قيد التنفيذ
+  if (!stdio && BIN === 'oqool-agent' && process.env.OQOOL_AGENT_NO_UPDATE !== '1') {
+    const tick = async () => {
+      if (!(await selfUpdate())) return setTimeout(tick, UPDATE_EVERY);
+      const swap = () => {
+        if (running.size || ops.busy()) return setTimeout(swap, 5000);
+        closing = true; ops.stopAll(); try { ws?.close(); } catch { /* */ }
+        // «setup» continues as a plain run (setup would stop the agent that started it)
+        const argv = process.argv.slice(2);
+        restartSelf(argv[0] === 'setup' ? [] : argv);
+      };
+      swap();
+    };
+    setTimeout(tick, UPDATE_EVERY);
+  }
   process.on('SIGINT', () => { closing = true; for (const c of running.values()) kill(c); ops.stopAll(); try { ws?.close(); } catch { /* closed */ } process.exit(0); });
   return new Promise(() => { /* serve until Ctrl+C */ });
 }
@@ -396,11 +412,13 @@ function retireBackground() {
   } catch { /* none running */ }
 }
 
+const FRESH = process.env.OQOOL_AGENT_FRESH === '1';
+delete process.env.OQOOL_AGENT_FRESH;
 const cmd = process.argv[2];
 if (cmd === '--version' || cmd === '-v' || cmd === 'version') out(VERSION);
 else if (cmd === '--help' || cmd === '-h' || cmd === 'help') out(t('help'));
 else if (cmd === 'update') { await selfUpdate(true); }
-else if (!['status', 'uninstall', 'logout'].includes(cmd) && (await selfUpdate())) await restartSelf();
+else if (!['status', 'uninstall', 'logout'].includes(cmd) && !FRESH && (await selfUpdate())) await restartSelf();
 else if (cmd === 'login') process.exit(await login());
 else if (cmd === 'setup') {
   // link (once), then run here in this window — nothing starts by itself, closing the window disconnects

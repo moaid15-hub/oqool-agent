@@ -10,27 +10,55 @@ export const c = {
   blue: rgb(96, 165, 250), rose: rgb(251, 113, 133), gray: rgb(148, 163, 184), green: rgb(74, 222, 128), run: brgb(34, 230, 110),
 };
 
-// the name at start, big · الاسم كبيراً عند البدء: OQOOL in block letters, teal → blue
+// the identity card at start, the same face as Oqool in the terminal · بطاقة الهوية عند البدء، بنفس وجه عقول في الطرفية:
+// "ANSI Shadow" letters in a teal → blue → violet gradient, inside a rounded frame, then the facts and the keys
 const WORD = [
-  ' ██████   ██████   ██████   ██████  ██     ',
-  '██    ██ ██    ██ ██    ██ ██    ██ ██     ',
-  '██    ██ ██ ▄▄ ██ ██    ██ ██    ██ ██     ',
-  ' ██████   ██████   ██████   ██████  ██████ ',
-  '             ▀▀                            ',
+  ' ██████╗  ██████╗  ██████╗  ██████╗ ██╗     ',
+  '██╔═══██╗██╔═══██╗██╔═══██╗██╔═══██╗██║     ',
+  '██║   ██║██║   ██║██║   ██║██║   ██║██║     ',
+  '██║   ██║██║▄▄ ██║██║   ██║██║   ██║██║     ',
+  '╚██████╔╝╚██████╔╝╚██████╔╝╚██████╔╝███████╗',
+  ' ╚═════╝  ╚══▀▀═╝  ╚═════╝  ╚═════╝ ╚══════╝',
 ];
-export function banner(version) {
-  const from = [45, 212, 191], to = [96, 165, 250];
-  const rows = WORD.map((row) => {
+const STOPS = [[0x5f, 0xd7, 0xd7], [0x8e, 0xac, 0xff], [0xa3, 0x9b, 0xff]];
+const gradientAt = (k) => {
+  const seg = k < 0.5 ? 0 : 1; const u = seg === 0 ? k / 0.5 : (k - 0.5) / 0.5;
+  return STOPS[seg].map((v, i) => Math.round(v + (STOPS[seg + 1][i] - v) * u));
+};
+const frame = rgb(0xa8, 0xa8, 0xa8);
+const soft = rgb(0xa8, 0xa8, 0xa8);
+const accent = rgb(0x5f, 0xd7, 0xd7);
+const visible = (x) => Array.from(x.replace(/\x1b\[[0-9;]*m/g, '')).length;
+
+/** info: { version, account, scope, connector } */
+export function banner(info) {
+  const i = typeof info === 'string' ? { version: info } : info;
+  const cols = Math.max(48, Math.min(process.stdout.columns || 80, 72));
+  const W = cols - 6; // │ + 2 spaces + content + 2 spaces + │
+  const wordW = Array.from(WORD[0]).length;
+  const word = WORD.map((row) => {
+    const ch = Array.from(row);
     if (!on()) return row;
     let o = '';
-    for (let i = 0; i < row.length; i++) {
-      const k = i / (row.length - 1);
-      const [r, g, b] = from.map((v, j) => Math.round(v + (to[j] - v) * k));
-      o += row[i] === ' ' ? ' ' : `\x1b[1;38;2;${r};${g};${b}m${row[i]}`;
-    }
+    for (let x = 0; x < ch.length; x++) { const [r, g, b] = gradientAt(x / (wordW - 1)); o += ch[x] === ' ' ? ' ' : `\x1b[38;2;${r};${g};${b}m${ch[x]}`; }
     return o + '\x1b[0m';
   });
-  return ['', ...rows.map((r) => '  ' + r), `  ${c.blue('Agent')} ${c.dim(version)}`, ''].join('\n');
+  const pad = (x) => x + ' '.repeat(Math.max(0, W - visible(x)));
+  const line = (x = '') => `${frame('│')}  ${pad(x)}  ${frame('│')}`;
+  const ver = soft(`v${i.version}`);
+  const out = [frame('╭' + '─'.repeat(cols - 2) + '╮'), line()];
+  word.forEach((w, r) => {
+    const last = r === word.length - 1;
+    out.push(line(last ? w + ' '.repeat(Math.max(1, W - wordW - visible(ver))) + ver : w));
+  });
+  out.push(line(), line(soft('Your computer, for AI models  ·  no open port  ·  yours to stop')), line(), line(soft('─'.repeat(W))), line());
+  const row = (k, v) => line(`${soft(k.padEnd(12))}${v ?? ''}`);
+  if (i.account) out.push(row('account', i.account));
+  out.push(row('computer', i.scope || 'the whole computer'));
+  if (i.connector) out.push(row('connector', i.connector));
+  out.push(line(), line(`${accent('Ctrl+C')}${soft(' stop   ')}${accent('close window')}${soft(' disconnect')}`), line());
+  out.push(frame('╰' + '─'.repeat(cols - 2) + '╯'));
+  return '\n' + out.join('\n') + '\n';
 }
 
 // one glyph per kind of work (Desktop Commander uses ✓ and a green dot; ours are diamonds by colour)

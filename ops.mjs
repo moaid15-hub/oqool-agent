@@ -385,5 +385,6 @@ export function createOps({ roots, home, onExit, logLine }) {
       }
     },
     stopAll() { for (const s of sessions.values()) if (!s.exited) killTree(s.pid); },
+    busy() { return [...sessions.values()].some((s) => !s.exited) || searches.size > 0 && [...searches.values()].some((x) => !x.done); },
   };
 }
