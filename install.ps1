@@ -1,4 +1,4 @@
-# Oqool Agent installer — Windows (CMD or PowerShell).
+# Oqool Agent installer - Windows (CMD or PowerShell).
 #   CMD:        powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/moaid15-hub/oqool-agent/releases/latest/download/install.ps1 | iex"
 #   PowerShell: irm https://github.com/moaid15-hub/oqool-agent/releases/latest/download/install.ps1 | iex
 # On Windows the agent is one script run by Node.js (Node is signed, so Smart App Control lets it run). An installed
@@ -21,21 +21,27 @@ function Get-NodeMajor([string]$exe) {
   return 0
 }
 
-# 1) Node.js — the one already on this computer (22+), or the official one in the agent's folder
+# a text file from the web (Windows PowerShell 5 hands GitHub's octet-stream back as bytes, so read it from disk)
+function Get-Text([string]$Uri) {
+  $f = [System.IO.Path]::GetTempFileName()
+  try { Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $f; return [System.IO.File]::ReadAllText($f) } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+}
+
+# 1) Node.js - the one already on this computer (22+), or the official one in the agent's folder
 $Node = $null
 $sys = Get-Command node -ErrorAction SilentlyContinue
 if ($sys -and (Get-NodeMajor $sys.Source) -ge 22) { $Node = $sys.Source }
 $local = Join-Path $Root 'node\node.exe'
 if (-not $Node -and (Test-Path $local) -and (Get-NodeMajor $local) -ge 22) { $Node = $local }
 if (-not $Node) {
-  Write-Host 'Oqool Agent: downloading Node.js (official, signed) …'
+  Write-Host 'Oqool Agent: downloading Node.js (official, signed) ...'
   $index = Invoke-RestMethod -UseBasicParsing 'https://nodejs.org/dist/index.json'
   $rel = $index | Where-Object { $_.lts -and ($_.files -contains 'win-x64-zip') -and ([int]($_.version.TrimStart('v').Split('.')[0]) -ge 22) } | Select-Object -First 1
   if (-not $rel) { throw 'Could not find a Node.js release to download.' }
   $zipName = "node-$($rel.version)-win-x64.zip"
   $zip = Join-Path $env:TEMP $zipName
   Invoke-WebRequest -UseBasicParsing -Uri "https://nodejs.org/dist/$($rel.version)/$zipName" -OutFile $zip
-  $sums = (Invoke-WebRequest -UseBasicParsing -Uri "https://nodejs.org/dist/$($rel.version)/SHASUMS256.txt").Content
+  $sums = Get-Text "https://nodejs.org/dist/$($rel.version)/SHASUMS256.txt"
   $want = ($sums -split "`n" | Where-Object { $_ -match "\s$([regex]::Escape($zipName))\s*$" } | ForEach-Object { ($_ -split '\s+')[0] }) | Select-Object -First 1
   if (-not $want -or (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower() -ne $want.ToLower()) { Remove-Item $zip -Force; throw 'Node.js checksum mismatch - not installed' }
   $tmp = Join-Path $Root 'node-download'
@@ -48,24 +54,24 @@ if (-not $Node) {
   Remove-Item $tmp -Recurse -Force
   $Node = $local
 }
-Write-Host "Oqool Agent: Node.js $(& $Node --version) → $Node"
+Write-Host "Oqool Agent: Node.js $(& $Node --version) -> $Node"
 
 # 2) the agent script, checked against the release's SHA256SUMS
-Write-Host 'Oqool Agent: downloading the agent …'
+Write-Host 'Oqool Agent: downloading the agent ...'
 $Script = Join-Path $Dir 'oqool-agent.mjs'
 $new = "$Script.download"
 Invoke-WebRequest -UseBasicParsing -Uri "$Base/oqool-agent.mjs" -OutFile $new
-$sums = (Invoke-WebRequest -UseBasicParsing -Uri "$Base/SHA256SUMS").Content
+$sums = Get-Text "$Base/SHA256SUMS"
 $want = ($sums -split "`n" | Where-Object { $_ -match '\soqool-agent\.mjs\s*$' } | ForEach-Object { ($_ -split '\s+')[0] }) | Select-Object -First 1
 if (-not $want -or (Get-FileHash -Algorithm SHA256 $new).Hash.ToLower() -ne $want.ToLower()) { Remove-Item $new -Force; throw 'Oqool Agent: checksum mismatch - not installed' }
 Move-Item -Force $new $Script
 
-# 3) the command «oqool-agent» (a .cmd beside the script); an older .exe of the agent is retired (it would win on PATH)
+# 3) the command "oqool-agent" (a .cmd beside the script); an older .exe of the agent is retired (it would win on PATH)
 Get-Process oqool-agent -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 foreach ($old in @('oqool-agent.exe', 'oqool-agent.exe.old', 'oqool-agent.exe.new')) { $f = Join-Path $Dir $old; if (Test-Path $f) { Remove-Item $f -Force -ErrorAction SilentlyContinue } }
 $Cmd = Join-Path $Dir 'oqool-agent.cmd'
 Set-Content -Path $Cmd -Encoding ASCII -Value "@echo off`r`n`"$Node`" `"%~dp0oqool-agent.mjs`" %*"
-Write-Host "OK  Oqool Agent $(& $Cmd --version) → $Cmd"
+Write-Host "OK  Oqool Agent $(& $Cmd --version) -> $Cmd"
 
 $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (-not ($UserPath -split ';' | Where-Object { $_ -eq $Dir })) {
