@@ -79,13 +79,13 @@ export function installService(parts, home) {
   return { kind: 'none' };
 }
 
-export function uninstallService() {
+export function uninstallService({ keepRunning = false } = {}) {
   if (process.platform === 'linux') {
-    run('systemctl', ['--user', 'disable', '--now', 'oqool-agent.service']);
+    run('systemctl', ['--user', 'disable', ...(keepRunning ? [] : ['--now']), 'oqool-agent.service']);
     for (const f of [unitPath(), desktopPath()]) try { fs.rmSync(f, { force: true }); } catch { /* */ }
     run('systemctl', ['--user', 'daemon-reload']);
   } else if (process.platform === 'darwin') {
-    run('launchctl', ['unload', '-w', plistPath()]);
+    if (!keepRunning) run('launchctl', ['unload', '-w', plistPath()]);
     try { fs.rmSync(plistPath(), { force: true }); } catch { /* */ }
   } else if (process.platform === 'win32') {
     run('reg', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'OqoolAgent', '/f']);

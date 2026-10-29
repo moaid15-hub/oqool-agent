@@ -1,8 +1,6 @@
-## Oqool Agent 0.4.1
+## Oqool Agent 0.5.0
 
-- `read_file` now reads **PDF** files as text, page by page (`offset` / `length` count pages).
-- `read_file` now reads **Excel** (.xlsx / .xlsm) sheets as CSV: choose `sheet` (name or index) and `range` (e.g. `A1:D20`).
-- `read_multiple_files` reads PDF and Excel too.
-- Pinned dependencies (`unpdf`, `fflate`), bundled into every build; nothing extra to install.
-
-Install / update: see the README. Running agents update themselves.
+- **Nothing runs by itself any more.** The agent runs in its window: keep it open while you work; closing the window (or Ctrl+C) disconnects. Run `oqool-agent` to connect again.
+- No start-with-computer entry and no hidden background agent. Entries left by older versions remove themselves on the next start; `oqool-agent setup` or `oqool-agent uninstall` also stops an older background agent at once.
+- `oqool-agent status` shows whether an agent is running.
+- Still here from 0.4.1: PDF and Excel reading.

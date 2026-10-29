@@ -26,7 +26,7 @@ irm https://github.com/moaid15-hub/oqool-agent/releases/latest/download/install.
 
 `irm` is a PowerShell command: in CMD it says *"irm" is not recognized* — use the CMD line instead.
 
-The installer opens your browser to link this computer to your Oqool account (one click), then keeps the agent running in the background and starts it with your computer.
+The installer opens your browser to link this computer to your Oqool account (one click), then runs the agent in that window. Keep the window open while you work; closing it disconnects. Nothing starts by itself: run `oqool-agent` to connect again.
 
 ## Connect a model
 
@@ -42,11 +42,11 @@ Sign in with your Oqool account and allow. That is all.
 
 | | |
 |---|---|
-| `oqool-agent setup` | link this computer and run in the background (the installer does this) |
+| `oqool-agent setup` | link this computer, then run in this window (the installer does this) |
 | `oqool-agent status` | linked? running? |
 | `oqool-agent` | run in this terminal until Ctrl+C |
 | `oqool-agent [folders…]` | run limited to those folders |
-| `oqool-agent uninstall` | stop the background agent and remove it from startup |
+| `oqool-agent uninstall` | stop an agent an older version left running, and its start-with-computer entry |
 | `oqool-agent logout` | forget the link |
 | `oqool-agent update` | update now (it also updates itself on every start) |
 

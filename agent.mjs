@@ -12,10 +12,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createOps, SKIP_DIRS } from './ops.mjs';
-import { openBrowser, installService, uninstallService, serviceStatus } from './service.mjs';
+import { openBrowser, uninstallService, serviceStatus } from './service.mjs';
 import * as ui from './ui.mjs';
 
-const VERSION = '0.4.1';
+const VERSION = '0.5.0';
 // how the user started it: the installed program (`oqool-agent`) or the script (`node agent.mjs`)
 // installed as one script run by Node (Windows: Smart App Control blocks unsigned programs; Node is signed) or as
 // one compiled program (Linux, macOS) · سكربت يشغّله Node على Windows، أو برنامج واحد على Linux وmacOS
@@ -32,13 +32,13 @@ const T = {
   notLinked: 'Not linked yet. Run: {bin} setup',
   help: `Oqool Agent {v} — connects AI models to your computer
 
-  {bin} setup          link this computer and keep the agent running in the background (start here)
-  {bin}                run in this terminal (the whole computer) until Ctrl+C
+  {bin} setup          link this computer, then run in this window (start here)
+  {bin}                run in this window (the whole computer); close the window or Ctrl+C to disconnect
   {bin} [folders…]     run limited to those folders
-  {bin} status         linked? running in the background?
+  {bin} status         linked? running?
   {bin} login          link this computer to your Oqool account
   {bin} logout         forget the link
-  {bin} uninstall      stop the background agent and remove it from startup
+  {bin} uninstall      stop an agent left running by an older version (nothing starts by itself)
   {bin} update         update now (it also updates itself on every start)
   {bin} --version      version
 
@@ -56,10 +56,9 @@ No open port, no keys on this computer. Limit it with allowed folders and a bloc
   updated: '✓ updated to',
   upToDate: '✓ up to date',
   updateFailed: 'Could not update now; continuing with this version',
-  setupDone: '✓ Oqool Agent runs in the background and starts with your computer.',
-  setupNext: 'Next: add the connector in Claude or ChatGPT:',
-  setupNoService: 'Background start is not available here; run "{bin}" in a terminal and keep it open.',
-  uninstalled: '✓ The background agent is stopped and removed from startup.',
+  setupNext: 'Add the connector in Claude or ChatGPT:',
+  keepOpen: 'Keep this window open while you work. Closing it disconnects; run {bin} to connect again.',
+  uninstalled: '✓ No Oqool Agent runs by itself on this computer.',
 };
 const t = (k) => T[k].replaceAll('{bin}', BIN).replaceAll('{v}', VERSION);
 // in the background (--service) there is no terminal: every line goes to ~/.oqool-agent/agent.log with the time
@@ -206,6 +205,11 @@ function walk(root) {
 async function serve(folders, stdio = false, quiet = false) {
   const acc = stdio ? { token: 'stdio' } : readAccount();
   if (!acc?.token) { out(t('notLinked')); return 1; }
+  if (!stdio) {
+    const pidFile = path.join(HOME, 'agent.pid');
+    try { fs.mkdirSync(HOME, { recursive: true, mode: 0o700 }); fs.writeFileSync(pidFile, String(process.pid)); } catch { /* */ }
+    process.on('exit', () => { try { if (fs.readFileSync(pidFile, 'utf8') === String(process.pid)) fs.rmSync(pidFile); } catch { /* */ } });
+  }
   const roots = folders.map((f) => fs.realpathSync(path.resolve(f)));
   // the snapshot base for an Oqool Cloud copy: the first folder, or the home folder on the whole computer
   const root = roots[0] || os.homedir();
@@ -382,6 +386,16 @@ async function serve(folders, stdio = false, quiet = false) {
   return new Promise(() => { /* serve until Ctrl+C */ });
 }
 
+// the start-with-computer entry of older versions, and an agent they left running in the background
+function removeAutostart() { try { uninstallService({ keepRunning: true }); } catch { /* */ } }
+function retireBackground() {
+  try { uninstallService(); } catch { /* */ }
+  try {
+    const pid = Number(fs.readFileSync(path.join(HOME, 'agent.pid'), 'utf8'));
+    if (pid && pid !== process.pid) process.kill(pid);
+  } catch { /* none running */ }
+}
+
 const cmd = process.argv[2];
 if (cmd === '--version' || cmd === '-v' || cmd === 'version') out(VERSION);
 else if (cmd === '--help' || cmd === '-h' || cmd === 'help') out(t('help'));
@@ -389,30 +403,27 @@ else if (cmd === 'update') { await selfUpdate(true); }
 else if (!['status', 'uninstall', 'logout'].includes(cmd) && (await selfUpdate())) await restartSelf();
 else if (cmd === 'login') process.exit(await login());
 else if (cmd === 'setup') {
-  // link (once), then the background agent with the whole computer, started with the computer
+  // link (once), then run here in this window — nothing starts by itself, closing the window disconnects
+  // اربط مرة، ثم اشتغل في هذه النافذة — لا شيء يبدأ وحده، وغلق النافذة يقطع الاتصال
   if (!readAccount()?.token && (await login()) !== 0) process.exit(1);
-  if (BIN !== 'oqool-agent') { out(t('setupNoService')); process.exit(0); }
-  const r = installService(SELF, HOME);
-  if (r.kind === 'none') out(t('setupNoService'));
-  else { out(t('setupDone')); out(`${t('setupNext')} ${RELAY}/mcp`); }
+  retireBackground();
+  out(`${t('setupNext')} ${RELAY}/mcp`);
+  out(t('keepOpen'));
+  await serve([]);
 }
 else if (cmd === 'status') {
   const acc = readAccount();
   const st = serviceStatus(HOME);
-  out(`Oqool Agent ${VERSION}\nlinked: ${acc?.token ? `yes (${acc.name})` : 'no'}\nbackground: ${st.installed ? (st.running ? 'running' : 'installed, not running') : 'not installed'}\nconnector: ${RELAY}/mcp`);
+  out(`Oqool Agent ${VERSION}\nlinked: ${acc?.token ? `yes (${acc.name})` : 'no'}\nrunning: ${st.running ? `yes (pid ${st.pid})` : 'no'}${st.installed ? '\nleft from an older version: a start-with-computer entry (remove: ' + BIN + ' uninstall)' : ''}\nconnector: ${RELAY}/mcp`);
 }
-else if (cmd === 'uninstall') { uninstallService(); out(t('uninstalled')); }
+else if (cmd === 'uninstall') { retireBackground(); out(t('uninstalled')); }
 else if (cmd === '--service') {
-  try { fs.mkdirSync(HOME, { recursive: true, mode: 0o700 }); fs.writeFileSync(path.join(HOME, 'agent.pid'), String(process.pid)); } catch { /* */ }
+  // started by an older version's start-with-computer entry: remove that entry and stop (nothing runs hidden)
+  // أُطلق من مدخل تشغيل تلقائي قديم: احذف المدخل وتوقّف (لا شيء يعمل مخفياً)
   LOG_FILE = path.join(HOME, 'agent.log');
-  out(`start ${VERSION} pid ${process.pid} (${process.platform})`);
-  process.on('exit', (code) => out(`exit ${code}`));
-  process.on('uncaughtException', (e) => { out(`crash ${String(e?.stack || e).slice(0, 800)}`); process.exit(1); });
-  process.on('unhandledRejection', (e) => { out(`unhandled ${String(e?.stack || e).slice(0, 800)}`); });
-  try { process.on('SIGTERM', () => { out('signal SIGTERM'); process.exit(0); }); } catch { /* */ }
-  // a closed window or a logged-off terminal is not a reason for the background agent to stop
-  for (const sig of ['SIGHUP', 'SIGBREAK']) { try { process.on(sig, () => out(`signal ${sig} (ignored)`)); } catch { /* not on this system */ } }
-  await serve([], false, true);
+  out(`start ${VERSION} pid ${process.pid} (${process.platform}) — the start-with-computer entry is removed; run oqool-agent in a window`);
+  removeAutostart();
+  process.exit(2);
 }
 else if (cmd === 'logout') { try { fs.rmSync(ACCOUNT, { force: true }); } catch { /* none */ } out(t('loggedOut')); }
 else if (cmd === '--stdio') await serve(process.argv.slice(3), true);

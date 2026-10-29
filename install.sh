@@ -64,9 +64,9 @@ case ":$PATH:" in
     ;;
 esac
 echo ""
-# link this computer and start the background agent right away (curl | sh has no keyboard on stdin: use the terminal)
+# link this computer, then run in this terminal (curl | sh has no keyboard on stdin: use the terminal)
 if [ -z "${OQOOL_AGENT_NO_SETUP:-}" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
   "$DIR/oqool-agent" setup < /dev/tty > /dev/tty 2>&1 || true
 else
-  echo "Next:  oqool-agent setup     (link this computer and keep the agent running)"
+  echo "Next:  oqool-agent setup     (link this computer, then run in this terminal)"
 fi

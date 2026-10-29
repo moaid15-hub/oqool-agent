@@ -80,5 +80,5 @@ if (-not ($UserPath -split ';' | Where-Object { $_ -eq $Dir })) {
 }
 $env:Path = "$env:Path;$Dir"
 Write-Host ''
-# link this computer and start the background agent right away
-if (-not $env:OQOOL_AGENT_NO_SETUP) { & $Cmd setup } else { Write-Host 'Next:  oqool-agent setup     (link this computer and keep the agent running)' }
+# link this computer, then run in this window (nothing starts by itself; closing the window disconnects)
+if (-not $env:OQOOL_AGENT_NO_SETUP) { & $Cmd setup } else { Write-Host 'Next:  oqool-agent setup     (link this computer, then run in this window)' }
