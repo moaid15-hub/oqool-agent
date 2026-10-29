@@ -1,4 +1,8 @@
-Oqool Agent 0.4.0
+## Oqool Agent 0.4.1
 
-- Windows: the agent runs as one script with the signed Node.js, so Smart App Control lets it run. The installer uses Node 22+ when present, otherwise downloads the official Node into the agent folder (no administrator rights).
-- The background start line on Windows is encoded (paths with spaces or quotes cannot break it).
+- `read_file` now reads **PDF** files as text, page by page (`offset` / `length` count pages).
+- `read_file` now reads **Excel** (.xlsx / .xlsm) sheets as CSV: choose `sheet` (name or index) and `range` (e.g. `A1:D20`).
+- `read_multiple_files` reads PDF and Excel too.
+- Pinned dependencies (`unpdf`, `fflate`), bundled into every build; nothing extra to install.
+
+Install / update: see the README. Running agents update themselves.

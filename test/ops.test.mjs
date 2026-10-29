@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { zipSync, strToU8 } from 'fflate';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oqa-test-')));
@@ -119,6 +120,44 @@ check('second root via config', r.ok && fs.existsSync(path.join(other, 'w.txt'))
 r = await op({ op: 'config.set', key: 'nope', value: 1 });
 check('config unknown key', !r.ok, JSON.stringify(r));
 // log + stats
+// documents: a small PDF and an Excel file built here · مستندات: PDF وExcel صغيران
+{
+  const pdfPage = (txt) => `BT /F1 12 Tf 72 720 Td (${txt}) Tj ET`;
+  const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 7 0 R >> >> >>', null,
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 7 0 R >> >> >>', null,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+  objs[3] = `<< /Length ${pdfPage('Hello page one').length} >>\nstream\n${pdfPage('Hello page one')}\nendstream`;
+  objs[5] = `<< /Length ${pdfPage('Second page here').length} >>\nstream\n${pdfPage('Second page here')}\nendstream`;
+  let pdf = '%PDF-1.4\n'; const offs = [];
+  objs.forEach((o, i) => { offs.push(pdf.length); pdf += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const x = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('')}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`;
+  fs.writeFileSync(path.join(root, 'doc.pdf'), pdf, 'latin1');
+  const X = (s) => strToU8(s);
+  fs.writeFileSync(path.join(root, 'book.xlsx'), zipSync({
+    '[Content_Types].xml': X('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>'),
+    'xl/workbook.xml': X('<workbook xmlns:r="r"><sheets><sheet name="Sales" sheetId="1" r:id="rId1"/><sheet name="Notes" sheetId="2" r:id="rId2"/></sheets></workbook>'),
+    'xl/_rels/workbook.xml.rels': X('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>'),
+    'xl/sharedStrings.xml': X('<sst><si><t>Item</t></si><si><t>Price</t></si><si><t>Tea, green</t></si><si><r><t>Cof</t></r><r><t>fee</t></r></si></sst>'),
+    'xl/worksheets/sheet1.xml': X('<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>3.5</v></c></row><row r="3"><c r="A3" t="s"><v>3</v></c><c r="C3" t="b"><v>1</v></c></row></sheetData></worksheet>'),
+    'xl/worksheets/sheet2.xml': X('<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>note &amp; more</t></is></c></row></sheetData></worksheet>'),
+  }));
+}
+r = await op({ op: 'read', path: 'doc.pdf' });
+check('read pdf', r.ok && r.kind === 'pdf' && r.total_pages === 2 && /Hello page one/.test(r.text) && /Second page here/.test(r.text), JSON.stringify(r).slice(0, 300));
+r = await op({ op: 'read', path: 'doc.pdf', offset: 1, length: 1 });
+check('read pdf page window', r.ok && r.from_page === 2 && r.to_page === 2 && !/page one/.test(r.text), JSON.stringify(r).slice(0, 300));
+r = await op({ op: 'read', path: 'book.xlsx' });
+check('read xlsx', r.ok && r.kind === 'xlsx' && r.sheet === 'Sales' && r.sheets.length === 2 && r.text === 'Item,Price,\n"Tea, green",3.5,\nCoffee,,TRUE' && r.range === 'A1:C3', JSON.stringify(r));
+r = await op({ op: 'read', path: 'book.xlsx', sheet: 'Sales', range: 'B1:B2' });
+check('read xlsx range', r.ok && r.text === 'Price\n3.5', JSON.stringify(r));
+r = await op({ op: 'read', path: 'book.xlsx', sheet: 1 });
+check('read xlsx second sheet', r.ok && r.sheet === 'Notes' && r.text === 'note & more', JSON.stringify(r));
+r = await op({ op: 'read', path: 'book.xlsx', sheet: 'Nope' });
+check('read xlsx bad sheet', !r.ok && /no_such_sheet/.test(r.error), JSON.stringify(r));
+r = await op({ op: 'read_many', paths: ['doc.pdf', 'book.xlsx'] });
+check('read_many docs', r.ok && r.files[0].kind === 'pdf' && r.files[1].kind === 'xlsx', JSON.stringify(r).slice(0, 200));
 r = await op({ op: 'log', limit: 100 });
 check('log', r.ok && r.calls.length > 20 && r.calls.some((c) => c.op === 'exec' && c.ok === false), String(r.calls?.length));
 r = await op({ op: 'stats' });

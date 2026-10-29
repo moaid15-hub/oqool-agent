@@ -13,11 +13,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
+import { readPdf, readXlsx } from './docs.mjs';
 
 export const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.oqool', '.oqool-agent', '__pycache__', '.venv', 'venv', 'target']);
 const IMAGE_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp' };
 const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_DOC_BYTES = 50 * 1024 * 1024;
 const DEFAULT_READ_LINES = 1000;
 const SESSION_BUFFER_CHARS = 2_000_000;
 
@@ -101,11 +103,20 @@ export function createOps({ roots, home, onExit, logLine }) {
   }
 
   // ── files ──
-  function readOne(p, offset = 0, length = DEFAULT_READ_LINES) {
+  async function readOne(p, offset = 0, length = DEFAULT_READ_LINES, opts = {}) {
     const abs = resolve(p);
     const st = fs.statSync(abs);
     if (st.isDirectory()) throw new Error('is_a_directory');
     const ext = path.extname(abs).toLowerCase();
+    if (ext === '.pdf' || ext === '.xlsx' || ext === '.xlsm') {
+      if (st.size > MAX_DOC_BYTES) throw new Error(`file_too_large: ${st.size} bytes (max ${MAX_DOC_BYTES})`);
+      const buf = fs.readFileSync(abs);
+      // for a PDF, offset/length count pages (length 0 = all)
+      const r = ext === '.pdf'
+        ? await readPdf(buf, { offset, length: opts.pages ? length : 0 })
+        : readXlsx(buf, { sheet: opts.sheet, range: opts.range });
+      return { path: abs, size: st.size, ...r };
+    }
     if (IMAGE_MIME[ext]) {
       if (st.size > MAX_IMAGE_BYTES) throw new Error('image_too_large');
       return { path: abs, kind: 'image', mime: IMAGE_MIME[ext], b64: fs.readFileSync(abs).toString('base64'), size: st.size };
@@ -310,8 +321,8 @@ export function createOps({ roots, home, onExit, logLine }) {
   // ── the dispatcher: returns the reply object, or throws ──
   async function run(m) {
     switch (m.op) {
-      case 'read': return readOne(m.path, m.offset, m.length);
-      case 'read_many': return { files: (m.paths || []).slice(0, 50).map((p) => { try { return readOne(p, 0, m.length || DEFAULT_READ_LINES); } catch (e) { return { path: p, error: String(e.message || e) }; } }) };
+      case 'read': return readOne(m.path, m.offset, m.length, { sheet: m.sheet, range: m.range, pages: m.length != null });
+      case 'read_many': return { files: await Promise.all((m.paths || []).slice(0, 50).map(async (p) => { try { return await readOne(p, 0, m.length || DEFAULT_READ_LINES); } catch (e) { return { path: p, error: String(e.message || e) }; } })) };
       case 'list': return list(m.path || '.', m.depth);
       case 'stat': return stat(m.path);
       case 'mkdir': { const abs = resolve(m.path); fs.mkdirSync(abs, { recursive: true }); return { path: abs }; }
