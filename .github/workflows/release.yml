@@ -1,0 +1,46 @@
+name: release
+
+# A tag v* builds one program per system from agent.mjs (Bun --compile, no Node needed on the user's machine)
+# and publishes them with the installers and SHA256SUMS on the GitHub release of that tag.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: version matches the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          got=$(grep -oE "const VERSION = '[^']+'" agent.mjs | cut -d"'" -f2)
+          [ "$want" = "$got" ] || { echo "tag $want != agent.mjs $got"; exit 1; }
+      - name: build
+        run: |
+          mkdir -p dist
+          for t in linux-x64 linux-arm64 darwin-x64 darwin-arm64 windows-x64; do
+            ext=""; [ "$t" = windows-x64 ] && ext=".exe"
+            bun build --compile --minify --target=bun-$t agent.mjs --outfile dist/oqool-agent-$t$ext
+          done
+          cp install.sh install.ps1 dist/
+          (cd dist && sha256sum oqool-agent-* > SHA256SUMS)
+          ls -la dist && cat dist/SHA256SUMS
+      - name: smoke test (linux-x64)
+        run: |
+          ./dist/oqool-agent-linux-x64 --version
+          ./dist/oqool-agent-linux-x64 --help
+      - name: publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Oqool Agent $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md

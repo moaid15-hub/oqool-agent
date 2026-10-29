@@ -1,0 +1,8 @@
+{
+  "client_id": "https://raw.githubusercontent.com/moaid15-hub/oqool-agent/main/test/client-metadata.json",
+  "client_name": "Oqool CIMD test client",
+  "redirect_uris": ["https://example.com/cimd-callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}
