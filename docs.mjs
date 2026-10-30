@@ -7,34 +7,59 @@ import { unzipSync, strFromU8 } from 'fflate';
 const MAX_CELLS = 200000;
 
 // ── PDF: text per page ──
-// PDFs often keep Arabic in display order with presentation-form letters: bring each mostly right-to-left line back to
-// reading order (letters to their normal form; Latin words and numbers inside it keep their own order)
-// كثير من ملفات PDF تحفظ العربي بترتيب العرض وبأشكال الحروف: نعيد السطر لترتيب القراءة
-const RTL_CH = /[֐-ࣿיִ-﷿ﹰ-﻿]/g;
-const LAT_CH = /[A-Za-z0-9]/g;
-const PRESENTATION = /[ﭐ-﷿ﹰ-﻿]/;
-export function readingOrder(text) {
-  return text.split('\n').map((line) => {
-    if (!PRESENTATION.test(line)) return line; // already logical text (no display-form letters)
-    const rtl = (line.match(RTL_CH) || []).length;
-    const lat = (line.match(LAT_CH) || []).length;
-    const norm = line.normalize('NFKC');
-    // a left-to-right line: each Arabic stretch (words and the spaces between them) is turned back on its own
-    if (rtl <= lat) return norm.replace(/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF](?:[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF ]*[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF])?/g, (m) => Array.from(m).reverse().join(''));
-    const flipped = Array.from(norm).reverse().join('');
-    return flipped.replace(/[A-Za-z0-9][A-Za-z0-9.,:;'"!?%()\/\- _]*[A-Za-z0-9]|[A-Za-z0-9]/g, (m) => Array.from(m).reverse().join(''));
-  }).join('\n');
+// Lines are rebuilt from the positioned pieces of text: a mostly right-to-left line is read from right to left, while
+// Latin words and numbers inside it keep their own left-to-right order · السطر يُبنى من القطع ومواضعها
+const kind = (t) => (/[A-Za-z0-9]/.test(t) ? 'L' : /[֐-ࣿיִ-﷿ﹰ-﻿]/.test(t) ? 'R' : 'N');
+function lineText(items) {
+  items.sort((a, b) => a.x - b.x);
+  const parts = [];
+  items.forEach((it, i) => {
+    const prev = items[i - 1];
+    if (prev && it.x - (prev.x + prev.w) > Math.max(2, it.h * 0.25) && prev.s !== ' ' && it.s !== ' ') parts.push({ s: ' ', k: 'N' });
+    // a lam ligature (لا، لى …) is one glyph holding two letters; the reader turns it around: turn it back
+    const str = /^[\u0627\u0623\u0625\u0622\u0649]\u0644$/.test(it.s) ? it.s[1] + it.s[0] : it.s;
+    parts.push({ s: str, k: kind(str) });
+  });
+  const r = parts.filter((p) => p.k === 'R').reduce((n, p) => n + p.s.length, 0);
+  const l = parts.filter((p) => p.k === 'L').reduce((n, p) => n + p.s.length, 0);
+  // runs: pieces of one direction, with the neutrals (spaces, dots) between two pieces of that direction, stay together
+  const runs = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    const last = runs[runs.length - 1];
+    const nextK = parts.slice(i + 1).find((q) => q.k !== 'N')?.k;
+    const k = p.k !== 'N' ? p.k : last && last.k !== 'N' && nextK === last.k ? last.k : 'N';
+    if (last && last.k === k && k !== 'N') last.items.push(p); else runs.push({ k, items: [p] });
+  }
+  const rtl = r > 0 && r >= (r + l) * 0.3; // Arabic is a third of the letters or more: a right-to-left line
+  if (rtl) runs.reverse(); // the right-most run first
+  for (const run of runs) if (run.k === 'R') run.items.reverse(); // each piece is already in reading order; the pieces are not
+  const text = runs.map((run) => run.items.map((p) => p.s).join('')).join('');
+  return text.normalize('NFKC').replace(/\s+/g, ' ').trim();
 }
 
 export async function readPdf(buf, { offset = 0, length = 0 } = {}) {
-  const { getDocumentProxy, extractText } = await import('unpdf');
+  const { getDocumentProxy } = await import('unpdf');
   const doc = await getDocumentProxy(new Uint8Array(buf));
-  const { totalPages, text } = await extractText(doc, { mergePages: false });
+  const totalPages = doc.numPages;
   const first = Math.min(Math.max(0, Number(offset) || 0), totalPages);
   const count = Number(length) > 0 ? Number(length) : totalPages;
-  const pages = text.slice(first, first + count);
-  const body = pages.map((t, i) => `--- page ${first + i + 1} ---\n${readingOrder(String(t).trim())}`).join('\n\n');
-  return { kind: 'pdf', text: body, total_pages: totalPages, from_page: first + 1, to_page: first + pages.length };
+  const out = [];
+  for (let n = first + 1; n <= Math.min(totalPages, first + count); n++) {
+    const page = await doc.getPage(n);
+    const tc = await page.getTextContent();
+    const lines = [];
+    for (const it of tc.items) {
+      if (!('str' in it) || it.str === '') continue;
+      const y = it.transform[5]; const h = Math.abs(it.transform[3]) || it.height || 10;
+      let line = lines.find((L) => Math.abs(L.y - y) <= Math.max(2, h * 0.35));
+      if (!line) { line = { y, items: [] }; lines.push(line); }
+      line.items.push({ s: it.str, x: it.transform[4], w: it.width, h });
+    }
+    lines.sort((a, b) => b.y - a.y);
+    out.push(`--- page ${n} ---\n${lines.map((L) => lineText(L.items)).filter(Boolean).join('\n')}`);
+  }
+  return { kind: 'pdf', text: out.join('\n\n'), total_pages: totalPages, from_page: first + 1, to_page: first + out.length };
 }
 
 // ── XLSX: a small, dependency-light reader ──
