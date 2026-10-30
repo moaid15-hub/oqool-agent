@@ -1,5 +1,6 @@
-## Oqool Agent 0.5.2
+## Oqool Agent 0.6.0
 
-- **Updates itself while it runs.** Every 10 minutes it checks for a new version; when one is out it waits until no command or process is running, then the same window continues with the new version. Nothing to press.
-- The start card now has Oqool's face: the OQOOL letters in Oqool's gradient inside a frame, with the account, the computer, the connector and the keys.
-- Commands in bold green (0.5.1); runs in its window only (0.5.0).
+- **Write PDF files** (`write_pdf`): from markdown with HTML, CSS, inline SVG and images; Arabic and right-to-left text work. Page breaks with `<div style="page-break-before: always;"></div>`. It is printed by the browser already on the computer (Edge, Chrome, Chromium or Brave), in the background with its own empty profile.
+- **Change an existing PDF**: delete pages, insert pages from markdown or from another PDF; saved under a new name, the original stays.
+- Reading a PDF now gives Arabic text in reading order.
+- Updates itself while it runs (0.5.2); runs in its window only (0.5.0).

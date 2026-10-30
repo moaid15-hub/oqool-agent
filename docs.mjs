@@ -7,6 +7,25 @@ import { unzipSync, strFromU8 } from 'fflate';
 const MAX_CELLS = 200000;
 
 // ── PDF: text per page ──
+// PDFs often keep Arabic in display order with presentation-form letters: bring each mostly right-to-left line back to
+// reading order (letters to their normal form; Latin words and numbers inside it keep their own order)
+// كثير من ملفات PDF تحفظ العربي بترتيب العرض وبأشكال الحروف: نعيد السطر لترتيب القراءة
+const RTL_CH = /[֐-ࣿיִ-﷿ﹰ-﻿]/g;
+const LAT_CH = /[A-Za-z0-9]/g;
+const PRESENTATION = /[ﭐ-﷿ﹰ-﻿]/;
+export function readingOrder(text) {
+  return text.split('\n').map((line) => {
+    if (!PRESENTATION.test(line)) return line; // already logical text (no display-form letters)
+    const rtl = (line.match(RTL_CH) || []).length;
+    const lat = (line.match(LAT_CH) || []).length;
+    const norm = line.normalize('NFKC');
+    // a left-to-right line: each Arabic stretch (words and the spaces between them) is turned back on its own
+    if (rtl <= lat) return norm.replace(/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF](?:[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF ]*[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF])?/g, (m) => Array.from(m).reverse().join(''));
+    const flipped = Array.from(norm).reverse().join('');
+    return flipped.replace(/[A-Za-z0-9][A-Za-z0-9.,:;'"!?%()\/\- _]*[A-Za-z0-9]|[A-Za-z0-9]/g, (m) => Array.from(m).reverse().join(''));
+  }).join('\n');
+}
+
 export async function readPdf(buf, { offset = 0, length = 0 } = {}) {
   const { getDocumentProxy, extractText } = await import('unpdf');
   const doc = await getDocumentProxy(new Uint8Array(buf));
@@ -14,7 +33,7 @@ export async function readPdf(buf, { offset = 0, length = 0 } = {}) {
   const first = Math.min(Math.max(0, Number(offset) || 0), totalPages);
   const count = Number(length) > 0 ? Number(length) : totalPages;
   const pages = text.slice(first, first + count);
-  const body = pages.map((t, i) => `--- page ${first + i + 1} ---\n${String(t).trim()}`).join('\n\n');
+  const body = pages.map((t, i) => `--- page ${first + i + 1} ---\n${readingOrder(String(t).trim())}`).join('\n\n');
   return { kind: 'pdf', text: body, total_pages: totalPages, from_page: first + 1, to_page: first + pages.length };
 }
 

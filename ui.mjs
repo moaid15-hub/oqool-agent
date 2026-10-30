@@ -65,7 +65,7 @@ export function banner(info) {
 const KIND = {
   read: ['read', c.blue], read_many: ['read', c.blue], list: ['list', c.blue], stat: ['info', c.blue], snapshot: ['sync', c.blue],
   'search.start': ['search', c.blue], 'search.more': ['search', c.blue], 'search.stop': ['search', c.gray], 'search.list': ['search', c.gray],
-  write: ['write', c.amber], edit: ['edit', c.amber], mkdir: ['mkdir', c.amber], move: ['move', c.amber], delete: ['delete', c.amber],
+  write: ['write', c.amber], 'pdf.write': ['pdf', c.amber], edit: ['edit', c.amber], mkdir: ['mkdir', c.amber], move: ['move', c.amber], delete: ['delete', c.amber],
   exec: ['run', c.run], kill: ['stop', c.run], 'session.start': ['start', c.run], 'session.input': ['type', c.run],
   'session.read': ['output', c.run], 'session.list': ['sessions', c.gray], 'session.stop': ['stop', c.run],
   ps: ['processes', c.gray], 'ps.kill': ['kill', c.rose], 'config.get': ['settings', c.gray], 'config.set': ['settings', c.amber],

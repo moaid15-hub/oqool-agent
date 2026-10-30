@@ -4,7 +4,9 @@
   "type": "module",
   "license": "UNLICENSED",
   "dependencies": {
-    "unpdf": "1.8.1",
-    "fflate": "0.8.2"
+    "fflate": "0.8.2",
+    "marked": "15.0.12",
+    "pdf-lib": "1.17.1",
+    "unpdf": "1.8.1"
   }
 }

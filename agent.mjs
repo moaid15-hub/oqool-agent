@@ -15,7 +15,7 @@ import { createOps, SKIP_DIRS } from './ops.mjs';
 import { openBrowser, uninstallService, serviceStatus } from './service.mjs';
 import * as ui from './ui.mjs';
 
-const VERSION = '0.5.2';
+const VERSION = '0.6.0';
 // how the user started it: the installed program (`oqool-agent`) or the script (`node agent.mjs`)
 // installed as one script run by Node (Windows: Smart App Control blocks unsigned programs; Node is signed) or as
 // one compiled program (Linux, macOS) · سكربت يشغّله Node على Windows، أو برنامج واحد على Linux وmacOS
@@ -155,7 +155,7 @@ async function selfUpdate(explicit = false) {
 const UPDATE_EVERY = Number(process.env.OQOOL_AGENT_UPDATE_EVERY_MS) || 10 * 60 * 1000;
 const OPS = ['info', 'snapshot', 'write', 'delete', 'exec', 'kill', 'read', 'read_many', 'list', 'stat', 'mkdir', 'move', 'edit',
   'search.start', 'search.more', 'search.stop', 'search.list', 'session.start', 'session.read', 'session.input', 'session.list', 'session.stop',
-  'ps', 'ps.kill', 'config.get', 'config.set', 'log', 'stats', 'shutdown'];
+  'pdf.write', 'ps', 'ps.kill', 'config.get', 'config.set', 'log', 'stats', 'shutdown'];
 
 /** Starts the freshly installed program with the same arguments and leaves with its exit code. */
 function restartSelf(argv = process.argv.slice(2)) {

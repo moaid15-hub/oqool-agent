@@ -52,7 +52,7 @@ Sign in with your Oqool account and allow. That is all.
 
 ## What it can do
 
-The whole computer by default, like Desktop Commander: read (windows of lines, images, PDF text, Excel sheets, several files), write, append, exact edits, list, file info, create, move, delete; background search; commands; live processes (REPL, ssh, servers) you can read from and type into; system processes; settings; a local log.
+The whole computer by default, like Desktop Commander: read (windows of lines, images, PDF text, Excel sheets, several files), write, append, exact edits, PDF writing (from markdown, or pages added and removed), list, file info, create, move; background search; commands; live processes (REPL, ssh, servers) you can read from and type into; system processes; settings; a local log.
 
 Limit it any time: allowed folders (`roots`) and your own block list of commands (`blockedCommands`) — set from the model with `set_config_value` or in `~/.oqool-agent/config.json`.
 

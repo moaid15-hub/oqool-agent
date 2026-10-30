@@ -35,7 +35,7 @@ let pass = 0, fail = 0;
 const check = (name, cond, extra = '') => { if (cond) { pass++; console.log('PASS', name); } else { fail++; console.log('FAIL', name, extra); } };
 
 const info = await op({ op: 'info' });
-check('info lists 29 ops', info.ops?.length === 29, JSON.stringify(info.ops?.length));
+check('info lists 30 ops', info.ops?.length === 30, JSON.stringify(info.ops?.length));
 let r = await op({ op: 'read', path: 'a.txt', offset: 1, length: 2 });
 check('read window', r.ok && r.text === 'two\nthree' && r.total_lines === 6, JSON.stringify(r));
 r = await op({ op: 'read', path: 'a.txt', offset: -3 });
@@ -158,6 +158,17 @@ r = await op({ op: 'read', path: 'book.xlsx', sheet: 'Nope' });
 check('read xlsx bad sheet', !r.ok && /no_such_sheet/.test(r.error), JSON.stringify(r));
 r = await op({ op: 'read_many', paths: ['doc.pdf', 'book.xlsx'] });
 check('read_many docs', r.ok && r.files[0].kind === 'pdf' && r.files[1].kind === 'xlsx', JSON.stringify(r).slice(0, 200));
+// writing PDF (needs a browser on this computer; the CI runner has Chrome) · كتابة PDF
+r = await op({ op: 'pdf.write', path: 'out/new.pdf', content: '# Title\n\nHello PDF world.\n\n<div style="page-break-before: always;"></div>\n\n## مرحبا\n\nنص عربي للتجربة' });
+check('write pdf (2 pages, Arabic)', r.ok && r.pages === 2 && fs.existsSync(path.join(root, 'out/new.pdf')), JSON.stringify(r).slice(0, 300));
+r = await op({ op: 'read', path: 'out/new.pdf' });
+check('written pdf reads back', r.ok && /Hello PDF world/.test(r.text) && /مرحبا/.test(r.text) && /نص عربي للتجربة/.test(r.text), JSON.stringify(r).slice(0, 300));
+r = await op({ op: 'pdf.write', path: 'out/new.pdf', output_path: 'out/changed.pdf', content: [{ type: 'delete', pageIndexes: [0] }, { type: 'insert', pageIndex: 1, markdown: '# Added page' }, { type: 'insert', pageIndex: 0, sourcePdfPath: 'doc.pdf' }] });
+check('modify pdf (delete, insert markdown, insert pdf)', r.ok && r.pages === 4 && r.done.length === 3, JSON.stringify(r).slice(0, 300));
+r = await op({ op: 'read', path: 'out/changed.pdf' });
+check('modified pdf has the right pages', r.ok && r.total_pages === 4 && /Hello page one/.test(r.text) && /Added page/.test(r.text) && !/Hello PDF world/.test(r.text), JSON.stringify(r).slice(0, 400));
+r = await op({ op: 'pdf.write', path: 'out/new.pdf', content: [{ type: 'delete', pageIndexes: [0] }] });
+check('modify needs a new name', !r.ok && /output_path_required/.test(r.error), JSON.stringify(r));
 r = await op({ op: 'log', limit: 100 });
 check('log', r.ok && r.calls.length > 20 && r.calls.some((c) => c.op === 'exec' && c.ok === false), String(r.calls?.length));
 r = await op({ op: 'stats' });
