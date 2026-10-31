@@ -15,7 +15,7 @@ import { createOps, SKIP_DIRS } from './ops.mjs';
 import { openBrowser, uninstallService, serviceStatus } from './service.mjs';
 import * as ui from './ui.mjs';
 
-const VERSION = '0.7.1';
+const VERSION = '0.7.2';
 // how the user started it: the installed program (`oqool-agent`) or the script (`node agent.mjs`)
 // installed as one script run by Node (Windows: Smart App Control blocks unsigned programs; Node is signed) or as
 // one compiled program (Linux, macOS) · سكربت يشغّله Node على Windows، أو برنامج واحد على Linux وmacOS

@@ -31,7 +31,10 @@ $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size); $g.Dispose()
 $w = $bmp.Width; $h = $bmp.Height; $max = ${maxWidth}
 if ($w -gt $max) { $nh = [int]($h * $max / $w); $small = New-Object System.Drawing.Bitmap $bmp, $max, $nh; $bmp.Dispose(); $bmp = $small }
-$bmp.Save('${file.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+$codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+$ep = New-Object System.Drawing.Imaging.EncoderParameters 1
+$ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 80
+$bmp.Save('${file.replace(/'/g, "''")}', $codec, $ep); $bmp.Dispose()
 Write-Output "$w $h"`);
     } else if (process.platform === 'darwin') {
       await run('screencapture', ['-x', '-t', 'png', file]);
@@ -43,9 +46,30 @@ Write-Output "$w $h"`);
       else if (has('scrot')) await run('scrot', [file]);
       else throw new Error('no screenshot tool: install gnome-screenshot, grim, spectacle or scrot');
     }
-    const buf = fs.readFileSync(file);
-    return { kind: 'image', mime: 'image/png', b64: buf.toString('base64'), size: buf.length };
-  } finally { try { fs.rmSync(file, { force: true }); } catch { /* */ } }
+    // the bridge carries one message of at most 1 MB: the picture goes as a JPEG no wider than maxWidth
+    const small = await shrink(file, maxWidth);
+    const buf = fs.readFileSync(small.file);
+    if (buf.length > 700_000) throw new Error(`screenshot too large (${buf.length} bytes): lower max_width`);
+    return { kind: 'image', mime: small.mime, b64: buf.toString('base64'), size: buf.length };
+  } finally { try { fs.rmSync(file, { force: true }); fs.rmSync(file + '.jpg', { force: true }); } catch { /* */ } }
+}
+
+// scale + JPEG with what the system has: ImageMagick, Python PIL, ffmpeg (Linux); sips (macOS); Windows did it already
+async function shrink(file, maxWidth) {
+  const out = file + '.jpg';
+  const w = String(Math.max(320, Math.min(2400, Number(maxWidth) || 1600)));
+  try {
+    if (process.platform === 'win32') return { file, mime: 'image/jpeg' }; // scaled and saved as JPEG above
+    if (process.platform === 'darwin') { await run('sips', ['-Z', w, '-s', 'format', 'jpeg', '-s', 'formatOptions', '80', file, '--out', out]); return { file: out, mime: 'image/jpeg' }; }
+    if (has('magick')) { await run('magick', [file, '-resize', `${w}x${w}>`, '-quality', '80', out]); return { file: out, mime: 'image/jpeg' }; }
+    if (has('convert')) { await run('convert', [file, '-resize', `${w}x${w}>`, '-quality', '80', out]); return { file: out, mime: 'image/jpeg' }; }
+    if (has('python3')) {
+      await run('python3', ['-c', 'import sys;from PIL import Image;i=Image.open(sys.argv[1]).convert("RGB");i.thumbnail((int(sys.argv[3]),int(sys.argv[3])));i.save(sys.argv[2],"JPEG",quality=80)', file, out, w]);
+      return { file: out, mime: 'image/jpeg' };
+    }
+    if (has('ffmpeg')) { await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', file, '-vf', `scale='min(${w},iw)':-2`, '-q:v', '5', out]); return { file: out, mime: 'image/jpeg' }; }
+  } catch { /* fall back to the PNG as it is */ }
+  return { file, mime: 'image/png' };
 }
 
 // ── mouse ──

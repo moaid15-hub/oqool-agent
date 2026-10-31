@@ -1,4 +1,3 @@
-## Oqool Agent 0.7.1
+## Oqool Agent 0.7.2
 
-- **Production.** The agent now links through the real Oqool bridge and the connector address is `https://relay.oqool.net/mcp`. A computer linked on the test bridge is linked again automatically: the next start opens the browser once.
-- Screen, mouse and keyboard tools with your consent in the window (0.7.0).
+- Screenshots arrive: the picture is scaled to max_width and sent as JPEG (under the bridge's 1 MB message limit). Linux uses ImageMagick, Python PIL or ffmpeg, whichever is there; macOS sips; Windows System.Drawing.
