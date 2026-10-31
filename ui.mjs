@@ -69,10 +69,11 @@ const KIND = {
   exec: ['run', c.run], kill: ['stop', c.run], 'session.start': ['start', c.run], 'session.input': ['type', c.run],
   'session.read': ['output', c.run], 'session.list': ['sessions', c.gray], 'session.stop': ['stop', c.run],
   ps: ['processes', c.gray], 'ps.kill': ['kill', c.rose], 'config.get': ['settings', c.gray], 'config.set': ['settings', c.amber],
+  'screen.capture': ['screen', c.rose], mouse: ['mouse', c.rose], keyboard: ['keys', c.rose],
   log: ['log', c.gray], stats: ['stats', c.gray], shutdown: ['shutdown', c.rose], info: ['hello', c.gray],
 };
 const time = () => new Date().toTimeString().slice(0, 8);
-const what = (m) => String(m.cmd ?? m.path ?? m.pattern ?? (m.from ? `${m.from} → ${m.to}` : '') ?? (m.paths ? m.paths.join(', ') : '') ?? m.key ?? m.session_id ?? m.pid ?? '').replace(/\s+/g, ' ').slice(0, 90);
+const what = (m) => String(m.cmd ?? m.path ?? m.pattern ?? (m.op === 'mouse' ? `${m.action || 'click'}${m.x != null ? ` ${m.x},${m.y}` : ''}` : null) ?? (m.op === 'keyboard' ? (m.keys || (m.text ? `type ${String(m.text).length} chars` : '')) : null) ?? (m.from ? `${m.from} → ${m.to}` : '') ?? (m.paths ? m.paths.join(', ') : '') ?? m.key ?? m.session_id ?? m.pid ?? '').replace(/\s+/g, ' ').slice(0, 90);
 const ms = (n) => (n < 1000 ? `${n}ms` : `${(n / 1000).toFixed(1)}s`);
 
 /** «▸ run  npm test» when a command starts (long work shows that it began). */

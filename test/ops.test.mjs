@@ -35,7 +35,7 @@ let pass = 0, fail = 0;
 const check = (name, cond, extra = '') => { if (cond) { pass++; console.log('PASS', name); } else { fail++; console.log('FAIL', name, extra); } };
 
 const info = await op({ op: 'info' });
-check('info lists 30 ops', info.ops?.length === 30, JSON.stringify(info.ops?.length));
+check('info lists 33 ops', info.ops?.length === 33, JSON.stringify(info.ops?.length));
 let r = await op({ op: 'read', path: 'a.txt', offset: 1, length: 2 });
 check('read window', r.ok && r.text === 'two\nthree' && r.total_lines === 6, JSON.stringify(r));
 r = await op({ op: 'read', path: 'a.txt', offset: -3 });
@@ -169,6 +169,19 @@ r = await op({ op: 'read', path: 'out/changed.pdf' });
 check('modified pdf has the right pages', r.ok && r.total_pages === 4 && /Hello page one/.test(r.text) && /Added page/.test(r.text) && !/Hello PDF world/.test(r.text), JSON.stringify(r).slice(0, 400));
 r = await op({ op: 'pdf.write', path: 'out/new.pdf', content: [{ type: 'delete', pageIndexes: [0] }] });
 check('modify needs a new name', !r.ok && /output_path_required/.test(r.error), JSON.stringify(r));
+// the screen/mouse/keyboard are gated: in the test mode (no window to answer in) they are refused unless allowed by env
+r = await op({ op: 'mouse', action: 'click', x: 10, y: 10 });
+check('control refused without consent', !r.ok && /control_denied/.test(r.error), JSON.stringify(r));
+r = await op({ op: 'screen.capture' });
+check('screenshot refused without consent', !r.ok && /control_denied/.test(r.error), JSON.stringify(r));
+r = await op({ op: 'config.set', key: 'control', value: 'never' });
+check('control can be switched off', r.ok && r.value === 'never', JSON.stringify(r));
+r = await op({ op: 'config.get' });
+check('config shows control', r.ok && r.control === 'never', JSON.stringify(r).slice(0, 200));
+r = await op({ op: 'config.set', key: 'control', value: 'maybe' });
+check('control accepts ask/never only', !r.ok, JSON.stringify(r));
+r = await op({ op: 'config.set', key: 'control', value: 'ask' });
+check('control back to ask', r.ok && r.value === 'ask', JSON.stringify(r));
 r = await op({ op: 'log', limit: 100 });
 check('log', r.ok && r.calls.length > 20 && r.calls.some((c) => c.op === 'exec' && c.ok === false), String(r.calls?.length));
 r = await op({ op: 'stats' });

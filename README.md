@@ -54,6 +54,8 @@ Sign in with your Oqool account and allow. That is all.
 
 The whole computer by default, like Desktop Commander: read (windows of lines, images, PDF text, Excel sheets, several files), write, append, exact edits, PDF writing (from markdown, or pages added and removed), list, file info, create, move; background search; commands; live processes (REPL, ssh, servers) you can read from and type into; system processes; settings; a local log.
 
+**Screen, mouse and keyboard** (screenshot, move/click/scroll, type/press keys) are gated: the first request of a session makes the agent ask in its window — `y` once, `a` while the window is open, `n` — and nothing moves before the answer; set `control` to `never` in the settings to switch it off. Windows needs nothing extra; macOS uses System Events (Accessibility permission once; `cliclick` for mouse moves); Linux needs `xdotool` (X11/XWayland) or `ydotool`/`wtype` (Wayland) and a screenshot tool (`gnome-screenshot`, `grim`, `spectacle` or `scrot`).
+
 Limit it any time: allowed folders (`roots`) and your own block list of commands (`blockedCommands`) — set from the model with `set_config_value` or in `~/.oqool-agent/config.json`.
 
 Outbound connection only — no open port, no keys on this computer.

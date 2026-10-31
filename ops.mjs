@@ -15,6 +15,7 @@ import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { readPdf, readXlsx } from './docs.mjs';
 import { writePdf } from './pdfwrite.mjs';
+import { screenshot, mouse, keyboard } from './control.mjs';
 
 export const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.oqool', '.oqool-agent', '__pycache__', '.venv', 'venv', 'target']);
 const IMAGE_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp' };
@@ -37,11 +38,13 @@ export function loadConfig(home) {
     roots: Array.isArray(c.roots) ? c.roots.map(String) : [],
     blockedCommands: Array.isArray(c.blockedCommands) ? c.blockedCommands.map(String) : [],
     defaultShell: typeof c.defaultShell === 'string' ? c.defaultShell : '',
+    // the screen, mouse and keyboard: 'ask' (the user answers in the agent window every session) or 'never'
+    control: c.control === 'never' ? 'never' : 'ask',
   };
 }
 function saveConfig(cfg) {
   fs.mkdirSync(path.dirname(cfg.file), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(cfg.file, JSON.stringify({ roots: cfg.roots, blockedCommands: cfg.blockedCommands, defaultShell: cfg.defaultShell }, null, 2), { mode: 0o600 });
+  fs.writeFileSync(cfg.file, JSON.stringify({ roots: cfg.roots, blockedCommands: cfg.blockedCommands, defaultShell: cfg.defaultShell, control: cfg.control }, null, 2), { mode: 0o600 });
 }
 
 /** The first blocked command found in a shell line, or null. An entry with a space ("git push --force") matches as a
@@ -324,6 +327,9 @@ export function createOps({ roots, home, onExit, logLine }) {
     switch (m.op) {
       case 'read': return readOne(m.path, m.offset, m.length, { sheet: m.sheet, range: m.range, pages: m.length != null });
       case 'read_many': return { files: await Promise.all((m.paths || []).slice(0, 50).map(async (p) => { try { return await readOne(p, 0, m.length || DEFAULT_READ_LINES); } catch (e) { return { path: p, error: String(e.message || e) }; } })) };
+      case 'screen.capture': return screenshot({ maxWidth: m.max_width });
+      case 'mouse': return mouse(m);
+      case 'keyboard': return keyboard(m);
       case 'pdf.write': return writePdf({ src: resolve(m.path), out: m.output_path ? resolve(m.output_path) : null, content: m.content, resolve });
       case 'list': return list(m.path || '.', m.depth);
       case 'stat': return stat(m.path);
@@ -341,7 +347,7 @@ export function createOps({ roots, home, onExit, logLine }) {
       case 'session.stop': { const s = sessions.get(m.session_id); if (!s) throw new Error('no_such_session'); const ok = s.exited || killTree(s.pid); await sleep(200); return { session_id: s.id, stopped: ok, output: s.out.slice(s.read) }; }
       case 'ps': return { processes: await ps() };
       case 'ps.kill': { const pid = Number(m.pid); if (!pid || pid === process.pid) throw new Error('bad_pid'); process.kill(pid, m.signal || 'SIGTERM'); return { pid, sent: m.signal || 'SIGTERM' }; }
-      case 'config.get': return { roots: whole() ? ['(whole machine)'] : allowed(), whole_machine: whole(), configured_roots: cfg.roots, blockedCommands: cfg.blockedCommands, defaultShell: cfg.defaultShell || (process.platform === 'win32' ? 'cmd.exe' : 'bash'), file: cfg.file, platform: process.platform, version: m.version };
+      case 'config.get': return { roots: whole() ? ['(whole machine)'] : allowed(), whole_machine: whole(), configured_roots: cfg.roots, blockedCommands: cfg.blockedCommands, defaultShell: cfg.defaultShell || (process.platform === 'win32' ? 'cmd.exe' : 'bash'), control: cfg.control, file: cfg.file, platform: process.platform, version: m.version };
       case 'config.set': {
         const k = String(m.key);
         let v = m.value;
@@ -352,7 +358,8 @@ export function createOps({ roots, home, onExit, logLine }) {
           cfg.roots = arr;
         } else if (k === 'blockedCommands') cfg.blockedCommands = (Array.isArray(v) ? v : [v]).map(String).filter(Boolean);
         else if (k === 'defaultShell') cfg.defaultShell = String(v || '');
-        else throw new Error(`unknown_key: ${k} (roots, blockedCommands, defaultShell)`);
+        else if (k === 'control') { if (!['ask', 'never'].includes(String(v))) throw new Error('control: ask or never'); cfg.control = String(v); }
+        else throw new Error(`unknown_key: ${k} (roots, blockedCommands, defaultShell, control)`);
         saveConfig(cfg);
         return { key: k, value: k === 'roots' || k === 'allowedDirectories' ? cfg.roots : cfg[k] };
       }
@@ -370,11 +377,11 @@ export function createOps({ roots, home, onExit, logLine }) {
   }
 
   /** Short arguments for the log: paths and commands, never file contents. */
-  const logArgs = (m) => { const a = {}; for (const k of ['path', 'from', 'to', 'cmd', 'pattern', 'session_id', 'search_id', 'pid', 'key']) if (m[k] !== undefined) a[k] = String(m[k]).slice(0, 200); return Object.keys(a).length ? a : undefined; };
+  const logArgs = (m) => { const a = {}; for (const k of ['path', 'from', 'to', 'cmd', 'pattern', 'session_id', 'search_id', 'pid', 'key', 'action', 'x', 'y', 'keys']) if (m[k] !== undefined) a[k] = String(m[k]).slice(0, 200); return Object.keys(a).length ? a : undefined; };
 
   return {
-    resolve, checkCmd, record, logArgs, allowed, whole, killTree,
-    has: (op) => /^(read|read_many|list|stat|mkdir|move|edit|search\.(start|more|stop|list)|session\.(start|read|input|list|stop)|pdf\.write|ps|ps\.kill|config\.(get|set)|log|stats|shutdown)$/.test(op),
+    resolve, checkCmd, record, logArgs, allowed, whole, killTree, controlMode: () => cfg.control,
+    has: (op) => /^(read|read_many|list|stat|mkdir|move|edit|search\.(start|more|stop|list)|session\.(start|read|input|list|stop)|pdf\.write|screen\.capture|mouse|keyboard|ps|ps\.kill|config\.(get|set)|log|stats|shutdown)$/.test(op),
     async handle(m) {
       const t0 = Date.now();
       try {

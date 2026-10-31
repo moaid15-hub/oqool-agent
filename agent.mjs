@@ -15,7 +15,7 @@ import { createOps, SKIP_DIRS } from './ops.mjs';
 import { openBrowser, uninstallService, serviceStatus } from './service.mjs';
 import * as ui from './ui.mjs';
 
-const VERSION = '0.6.2';
+const VERSION = '0.7.0';
 // how the user started it: the installed program (`oqool-agent`) or the script (`node agent.mjs`)
 // installed as one script run by Node (Windows: Smart App Control blocks unsigned programs; Node is signed) or as
 // one compiled program (Linux, macOS) · سكربت يشغّله Node على Windows، أو برنامج واحد على Linux وmacOS
@@ -56,6 +56,10 @@ No open port, no keys on this computer. Limit it with allowed folders and a bloc
   updated: '✓ updated to',
   upToDate: '✓ up to date',
   updateFailed: 'Could not update now; continuing with this version',
+  controlAsk: 'An AI model asks to see the screen and control the mouse and keyboard of this computer.',
+  controlHow: 'Allow?  [y] this once   [a] always while this window is open   [n] no   (no answer in 90 s = no)',
+  controlYes: '✓ allowed this once', controlAlways: '✓ allowed while this window is open', controlNo: '✕ not allowed',
+  controlOff: 'screen/mouse/keyboard control is off (config: control = never)', controlNoTty: 'control needs the agent window to answer in',
   setupNext: 'Add the connector in Claude or ChatGPT:',
   keepOpen: 'Keep this window open while you work. Closing it disconnects; run {bin} to connect again.',
   uninstalled: '✓ No Oqool Agent runs by itself on this computer.',
@@ -152,10 +156,50 @@ async function selfUpdate(explicit = false) {
     return false;
   }
 }
+// consent for the screen/mouse/keyboard: asked in this window; 'always' lasts until the window closes
+const CONTROL_OPS = new Set(['screen.capture', 'mouse', 'keyboard']);
+let controlAlways = false;
+let controlPending = null; // one question at a time; later requests wait for the same answer
+function askControl() {
+  if (process.env.OQOOL_AGENT_CONTROL === 'allow') return Promise.resolve(true);
+  if (process.env.OQOOL_AGENT_CONTROL === 'deny') return Promise.resolve(false);
+  if (controlAlways) return Promise.resolve(true);
+  if (controlPending) return controlPending;
+  if (!process.stdin.isTTY) return Promise.resolve(false);
+  controlPending = new Promise((res) => {
+    out('');
+    out(ui.c.bold(ui.c.rose('⚠ ' + t('controlAsk'))));
+    out('  ' + t('controlHow'));
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    try { stdin.setRawMode(true); } catch { /* */ }
+    stdin.resume();
+    const done = (answer) => {
+      clearTimeout(timer);
+      stdin.removeListener('data', onKey);
+      try { stdin.setRawMode(!!wasRaw); } catch { /* */ }
+      stdin.pause();
+      if (answer === 'a') { controlAlways = true; out('  ' + ui.c.green(t('controlAlways'))); }
+      else if (answer === 'y') out('  ' + ui.c.green(t('controlYes')));
+      else out('  ' + ui.c.rose(t('controlNo')));
+      controlPending = null;
+      res(answer === 'y' || answer === 'a');
+    };
+    const onKey = (buf) => {
+      const k = buf.toString().toLowerCase();
+      if (k === '\u0003') { out(''); process.emit('SIGINT'); return; }
+      if (k === 'y' || k === 'a' || k === 'n') done(k);
+    };
+    const timer = setTimeout(() => done('n'), 90_000);
+    stdin.on('data', onKey);
+  });
+  return controlPending;
+}
+
 const UPDATE_EVERY = Number(process.env.OQOOL_AGENT_UPDATE_EVERY_MS) || 10 * 60 * 1000;
 const OPS = ['info', 'snapshot', 'write', 'delete', 'exec', 'kill', 'read', 'read_many', 'list', 'stat', 'mkdir', 'move', 'edit',
   'search.start', 'search.more', 'search.stop', 'search.list', 'session.start', 'session.read', 'session.input', 'session.list', 'session.stop',
-  'pdf.write', 'ps', 'ps.kill', 'config.get', 'config.set', 'log', 'stats', 'shutdown'];
+  'pdf.write', 'screen.capture', 'mouse', 'keyboard', 'ps', 'ps.kill', 'config.get', 'config.set', 'log', 'stats', 'shutdown'];
 
 /** Starts the freshly installed program with the same arguments and leaves with its exit code. */
 function restartSelf(argv = process.argv.slice(2)) {
@@ -254,6 +298,17 @@ async function serve(folders, stdio = false, quiet = false) {
     const reply = (x) => { if (show) out(ui.finished(m, x, Date.now() - t0)); send(from, { id: m.id, ...x }); };
     try {
       if (m.op === 'info') return reply({ ok: true, root, roots: ops.allowed(), platform: process.platform, arch: process.arch, shell: process.platform === 'win32' ? 'cmd' : 'bash', version: VERSION, ops: OPS });
+      // the screen, mouse and keyboard: only with the user's answer in this window · فقط بموافقة المستخدم في هذه النافذة
+      if (CONTROL_OPS.has(m.op)) {
+        if (ops.controlMode() === 'never') return reply({ ok: false, error: 'control_off: ' + t('controlOff') });
+        if (stdio && process.env.OQOOL_AGENT_CONTROL !== 'allow') return reply({ ok: false, error: 'control_denied: ' + t('controlNoTty') });
+        askControl().then((ok) => {
+          if (!ok) return reply({ ok: false, error: 'control_denied: the user did not allow it' });
+          if (show) out(ui.started(m));
+          ops.handle({ ...m, version: VERSION }).then((r) => reply(r));
+        });
+        return;
+      }
       if (ops.has(m.op)) { ops.handle({ ...m, version: VERSION }).then((r) => reply(r)); return; }
       if (m.op === 'snapshot') {
         known.clear();

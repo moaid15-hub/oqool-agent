@@ -1,4 +1,6 @@
-## Oqool Agent 0.6.2
+## Oqool Agent 0.7.0
 
-- Reading a PDF rebuilds each line from the positioned pieces of text: Arabic comes out in reading order, with Latin words and numbers inside it in their own order, and lam ligatures (لا، لى) the right way round.
-- Everything else as in 0.6.1.
+- **Screen, mouse and keyboard** — three new tools: `screen_capture`, `mouse_control` (move, click, double, right, scroll), `keyboard_control` (type text, press combinations like `ctrl+s`).
+- **Every use needs your answer in the agent window**: `y` this once, `a` while the window stays open, `n`. No answer in 90 s = no. Nothing moves before you answer. Switch it off for good with `control = never` in the settings.
+- Windows works out of the box (PowerShell). macOS uses System Events (allow Accessibility once; `cliclick` for mouse moves). Linux needs `xdotool` or `ydotool`/`wtype` and a screenshot tool.
+- 33 tools now.
