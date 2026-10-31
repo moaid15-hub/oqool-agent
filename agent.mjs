@@ -15,7 +15,7 @@ import { createOps, SKIP_DIRS } from './ops.mjs';
 import { openBrowser, uninstallService, serviceStatus } from './service.mjs';
 import * as ui from './ui.mjs';
 
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 // how the user started it: the installed program (`oqool-agent`) or the script (`node agent.mjs`)
 // installed as one script run by Node (Windows: Smart App Control blocks unsigned programs; Node is signed) or as
 // one compiled program (Linux, macOS) · سكربت يشغّله Node على Windows، أو برنامج واحد على Linux وmacOS
@@ -56,6 +56,7 @@ No open port, no keys on this computer. Limit it with allowed folders and a bloc
   updated: '✓ updated to',
   upToDate: '✓ up to date',
   updateFailed: 'Could not update now; continuing with this version',
+  retiredLink: 'The test bridge is retired: this computer is linked again on the real Oqool bridge.',
   controlAsk: 'An AI model asks to see the screen and control the mouse and keyboard of this computer.',
   controlHow: 'Allow?  [y] this once   [a] always while this window is open   [n] no   (no answer in 90 s = no)',
   controlYes: '✓ allowed this once', controlAlways: '✓ allowed while this window is open', controlNo: '✕ not allowed',
@@ -76,8 +77,12 @@ const out = (s) => {
   } catch { /* the log never stops the agent */ }
 };
 
-const RELAY = (process.env.OQOOL_AGENT_RELAY || 'https://oqool-relay-cloud.moaid15.workers.dev').replace(/\/+$/, '');
-const SITE = (process.env.OQOOL_AGENT_SITE || 'https://oqool-net-cloud.moaid15.workers.dev').replace(/\/+$/, '');
+const RELAY = (process.env.OQOOL_AGENT_RELAY || 'https://oqool-relay.moaid15.workers.dev').replace(/\/+$/, '');
+const SITE = (process.env.OQOOL_AGENT_SITE || 'https://oqool.net').replace(/\/+$/, '');
+// the connector address people add in Claude or ChatGPT · عنوان الموصل
+const MCP_URL = process.env.OQOOL_AGENT_MCP_URL || 'https://relay.oqool.net/mcp';
+// the test bridge of the first weeks: a link made there is forgotten, the computer is linked again on the real one
+const RETIRED_RELAYS = ['https://oqool-relay-cloud.moaid15.workers.dev'];
 const HOME = process.env.OQOOL_AGENT_HOME || path.join(os.homedir(), '.oqool-agent');
 const ACCOUNT = path.join(HOME, 'account.json');
 
@@ -85,7 +90,13 @@ const ACCOUNT = path.join(HOME, 'account.json');
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_FILES = 5000;
 
-function readAccount() { try { return JSON.parse(fs.readFileSync(ACCOUNT, 'utf8')); } catch { return null; } }
+function readAccount() {
+  try {
+    const a = JSON.parse(fs.readFileSync(ACCOUNT, 'utf8'));
+    if (a && RETIRED_RELAYS.includes(String(a.relay || '').replace(/\/+$/, ''))) { try { fs.rmSync(ACCOUNT, { force: true }); } catch { /* */ } out(t('retiredLink')); return null; }
+    return a;
+  } catch { return null; }
+}
 
 async function login() {
   const r = await fetch(`${RELAY}/pair/start`, { method: 'POST', headers: { 'content-type': 'application/json' },
@@ -398,7 +409,7 @@ async function serve(folders, stdio = false, quiet = false) {
     out(quiet ? 'heartbeat lost, reconnecting' : ui.status.lost());
     setTimeout(connect, 1000);
   };
-  if (!quiet) out(ui.banner({ version: VERSION, account: acc.name, scope: ops.whole() ? t('wholeMachine') : ops.allowed().join(', '), connector: `${acc.relay || RELAY}/mcp` }));
+  if (!quiet) out(ui.banner({ version: VERSION, account: acc.name, scope: ops.whole() ? t('wholeMachine') : ops.allowed().join(', '), connector: MCP_URL }));
   const connect = () => {
     if (!quiet) out(ui.status.connecting());
     const sock = new WebSocket(`${acc.relay.replace(/^http/, 'ws')}/ws/agent?token=${encodeURIComponent(acc.token)}`);
@@ -480,14 +491,14 @@ else if (cmd === 'setup') {
   // اربط مرة، ثم اشتغل في هذه النافذة — لا شيء يبدأ وحده، وغلق النافذة يقطع الاتصال
   if (!readAccount()?.token && (await login()) !== 0) process.exit(1);
   retireBackground();
-  out(`${t('setupNext')} ${RELAY}/mcp`);
+  out(`${t('setupNext')} ${MCP_URL}`);
   out(t('keepOpen'));
   await serve([]);
 }
 else if (cmd === 'status') {
   const acc = readAccount();
   const st = serviceStatus(HOME);
-  out(`Oqool Agent ${VERSION}\nlinked: ${acc?.token ? `yes (${acc.name})` : 'no'}\nrunning: ${st.running ? `yes (pid ${st.pid})` : 'no'}${st.installed ? '\nleft from an older version: a start-with-computer entry (remove: ' + BIN + ' uninstall)' : ''}\nconnector: ${RELAY}/mcp`);
+  out(`Oqool Agent ${VERSION}\nlinked: ${acc?.token ? `yes (${acc.name})` : 'no'}\nrunning: ${st.running ? `yes (pid ${st.pid})` : 'no'}${st.installed ? '\nleft from an older version: a start-with-computer entry (remove: ' + BIN + ' uninstall)' : ''}\nconnector: ${MCP_URL}`);
 }
 else if (cmd === 'uninstall') { retireBackground(); out(t('uninstalled')); }
 else if (cmd === '--service') {
@@ -500,4 +511,8 @@ else if (cmd === '--service') {
 }
 else if (cmd === 'logout') { try { fs.rmSync(ACCOUNT, { force: true }); } catch { /* none */ } out(t('loggedOut')); }
 else if (cmd === '--stdio') await serve(process.argv.slice(3), true);
-else await serve(process.argv.slice(2).filter((a) => !a.startsWith('-')));
+else {
+  // a plain run on a computer not linked yet (or linked on the retired test bridge): link first, then serve
+  if (!readAccount()?.token && process.stdin.isTTY && (await login()) !== 0) process.exit(1);
+  await serve(process.argv.slice(2).filter((a) => !a.startsWith('-')));
+}

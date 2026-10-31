@@ -33,7 +33,7 @@ The installer opens your browser to link this computer to your Oqool account (on
 Add the connector in Claude or ChatGPT (custom connector):
 
 ```
-https://oqool-relay-cloud.moaid15.workers.dev/mcp
+https://relay.oqool.net/mcp
 ```
 
 Sign in with your Oqool account and allow. That is all.
