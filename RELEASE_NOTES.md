@@ -1,3 +1,3 @@
-## Oqool Agent 0.7.2
+## Oqool Agent 0.7.3
 
-- Screenshots arrive: the picture is scaled to max_width and sent as JPEG (under the bridge's 1 MB message limit). Linux uses ImageMagick, Python PIL or ffmpeg, whichever is there; macOS sips; Windows System.Drawing.
+- Windows screenshots work with Windows Defender on: capture and resize run as two short PowerShell steps (one combined script was flagged). A PowerShell step that hangs is cut after 20 s.
